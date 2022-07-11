@@ -1,0 +1,156 @@
+I"�f<h3 id="treasure-nft-marketplace">Treasure NFT marketplace</h3>
+
+<p>이전 <a href="https://treasure.lol/">TreasureDAO</a> NFT 마켓플레이스를 예전에 분석했던 경험과, 이때 찾았던 취약점을 말해보고자 한다. 또한, 2022년 3월초에 실제로 해당 마켓플레이스 NFT 자산들이 탈취된 <a href="https://news.bitcoin.com/attacker-hacks-arbitrums-treasure-dao-for-over-100-nfts-by-leveraging-marketplace-exploit/">공격</a>에 대해 설명해보고자 한다.</p>
+
+<p>기존 마켓플이스의 전체 코드는 Arbiscan에서의 <a href="https://arbiscan.io/address/0x812cda2181ed7c45a35a691e0c85e231d218e273#code">Contract</a>에서 확인해볼 수 있다. 우선 내가 처음 파악했던 문제점은 NFT를 리스팅 할 때 ERC721과 ERC1155에 대한 quantity 체크를 명확히 하지 않는 부분에 있다. 아래 코드를 보자.</p>
+
+<div class="language-solidity highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">function</span> <span class="n">createListing</span><span class="p">(</span>
+        <span class="kt">address</span> <span class="n">_nftAddress</span><span class="p">,</span>
+        <span class="kt">uint256</span> <span class="n">_tokenId</span><span class="p">,</span>
+        <span class="kt">uint256</span> <span class="n">_quantity</span><span class="p">,</span>
+        <span class="kt">uint256</span> <span class="n">_pricePerItem</span><span class="p">,</span>
+        <span class="kt">uint256</span> <span class="n">_expirationTime</span>
+    <span class="p">)</span> <span class="k">external</span> <span class="n">notListed</span><span class="p">(</span><span class="n">_nftAddress</span><span class="p">,</span> <span class="n">_tokenId</span><span class="p">,</span> <span class="n">_msgSender</span><span class="p">())</span> <span class="n">onlyWhitelisted</span><span class="p">(</span><span class="n">_nftAddress</span><span class="p">)</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">_expirationTime</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span> <span class="n">_expirationTime</span> <span class="o">=</span> <span class="k">type</span><span class="p">(</span><span class="kt">uint256</span><span class="p">).</span><span class="n">max</span><span class="p">;</span>
+        <span class="nb">require</span><span class="p">(</span><span class="n">_expirationTime</span> <span class="o">&gt;</span> <span class="n">block</span><span class="p">.</span><span class="n">timestamp</span><span class="p">,</span> <span class="s">"invalid expiration time"</span><span class="p">);</span>
+        <span class="nb">require</span><span class="p">(</span><span class="n">_quantity</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">,</span> <span class="s">"nothing to list"</span><span class="p">);</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="n">IERC165</span><span class="p">(</span><span class="n">_nftAddress</span><span class="p">).</span><span class="n">supportsInterface</span><span class="p">(</span><span class="n">INTERFACE_ID_ERC721</span><span class="p">))</span> <span class="p">{</span>
+            <span class="n">IERC721</span> <span class="n">nft</span> <span class="o">=</span> <span class="n">IERC721</span><span class="p">(</span><span class="n">_nftAddress</span><span class="p">);</span>
+            <span class="nb">require</span><span class="p">(</span><span class="n">nft</span><span class="p">.</span><span class="n">ownerOf</span><span class="p">(</span><span class="n">_tokenId</span><span class="p">)</span> <span class="o">==</span> <span class="n">_msgSender</span><span class="p">(),</span> <span class="s">"not owning item"</span><span class="p">);</span>
+            <span class="nb">require</span><span class="p">(</span><span class="n">nft</span><span class="p">.</span><span class="n">isApprovedForAll</span><span class="p">(</span><span class="n">_msgSender</span><span class="p">(),</span> <span class="kt">address</span><span class="p">(</span><span class="nb">this</span><span class="p">)),</span> <span class="s">"item not approved"</span><span class="p">);</span>
+        <span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="p">(</span><span class="n">IERC165</span><span class="p">(</span><span class="n">_nftAddress</span><span class="p">).</span><span class="n">supportsInterface</span><span class="p">(</span><span class="n">INTERFACE_ID_ERC1155</span><span class="p">))</span> <span class="p">{</span>
+            <span class="n">IERC1155</span> <span class="n">nft</span> <span class="o">=</span> <span class="n">IERC1155</span><span class="p">(</span><span class="n">_nftAddress</span><span class="p">);</span>
+            <span class="nb">require</span><span class="p">(</span><span class="n">nft</span><span class="p">.</span><span class="n">balanceOf</span><span class="p">(</span><span class="n">_msgSender</span><span class="p">(),</span> <span class="n">_tokenId</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="n">_quantity</span><span class="p">,</span> <span class="s">"must hold enough nfts"</span><span class="p">);</span>
+            <span class="nb">require</span><span class="p">(</span><span class="n">nft</span><span class="p">.</span><span class="n">isApprovedForAll</span><span class="p">(</span><span class="n">_msgSender</span><span class="p">(),</span> <span class="kt">address</span><span class="p">(</span><span class="nb">this</span><span class="p">)),</span> <span class="s">"item not approved"</span><span class="p">);</span>
+        <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+            <span class="nb">revert</span><span class="p">(</span><span class="s">"invalid nft address"</span><span class="p">);</span>
+        <span class="p">}</span>
+
+        <span class="n">listings</span><span class="p">[</span><span class="n">_nftAddress</span><span class="p">][</span><span class="n">_tokenId</span><span class="p">][</span><span class="n">_msgSender</span><span class="p">()]</span> <span class="o">=</span> <span class="n">Listing</span><span class="p">(</span>
+            <span class="n">_quantity</span><span class="p">,</span>
+            <span class="n">_pricePerItem</span><span class="p">,</span>
+            <span class="n">_expirationTime</span>
+        <span class="p">);</span>
+
+        <span class="k">emit</span> <span class="n">ItemListed</span><span class="p">(</span>
+            <span class="n">_msgSender</span><span class="p">(),</span>
+            <span class="n">_nftAddress</span><span class="p">,</span>
+            <span class="n">_tokenId</span><span class="p">,</span>
+            <span class="n">_quantity</span><span class="p">,</span>
+            <span class="n">_pricePerItem</span><span class="p">,</span>
+            <span class="n">_expirationTime</span>
+        <span class="p">);</span>
+    <span class="p">}</span>
+</code></pre></div></div>
+
+<p>위 코드에서의 문제점은 ERC721에 대한 수량체크가 이뤄지고 있지 않다는 점이다. ERC1155는 아래와 같이 소유권을 확인함과 동시에, quantity만큼 보유하고 있는지 체크하며 자동으로 quantity에 대한 검사를 수행한다.</p>
+
+<div class="language-solidity highlighter-rouge"><div class="highlight"><pre class="highlight"><code> <span class="nb">require</span><span class="p">(</span><span class="n">nft</span><span class="p">.</span><span class="n">balanceOf</span><span class="p">(</span><span class="n">_msgSender</span><span class="p">(),</span> <span class="n">_tokenId</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="n">_quantity</span><span class="p">,</span> <span class="s">"must hold enough nfts"</span><span class="p">);</span>
+</code></pre></div></div>
+
+<p>하지만 ERC721에 대한 아래 코드를 보면 알 수 있듯이, ERC721는 무조건 수량이 1이어야됨에도 불구하고 <code class="language-plaintext highlighter-rouge">require(_quantity==1, quantity error)</code>와 같은 에러 처리문이 없다. ERC721은 같은 NFT에 대해 수량이 존재하는 ERC1155과는 달리 하나하나가 고유한 NFT로서 quantity가 무조건 1이 되어야하는데, 단지 소유권만 확인하고 비정상적인 quantity에 대한 체크를 빼먹은 케이스이다.</p>
+
+<div class="language-solidity highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">if</span> <span class="p">(</span><span class="n">IERC165</span><span class="p">(</span><span class="n">_nftAddress</span><span class="p">).</span><span class="n">supportsInterface</span><span class="p">(</span><span class="n">INTERFACE_ID_ERC721</span><span class="p">))</span> <span class="p">{</span>
+            <span class="n">IERC721</span> <span class="n">nft</span> <span class="o">=</span> <span class="n">IERC721</span><span class="p">(</span><span class="n">_nftAddress</span><span class="p">);</span>
+            <span class="nb">require</span><span class="p">(</span><span class="n">nft</span><span class="p">.</span><span class="n">ownerOf</span><span class="p">(</span><span class="n">_tokenId</span><span class="p">)</span> <span class="o">==</span> <span class="n">_msgSender</span><span class="p">(),</span> <span class="s">"not owning item"</span><span class="p">);</span>
+            <span class="nb">require</span><span class="p">(</span><span class="n">nft</span><span class="p">.</span><span class="n">isApprovedForAll</span><span class="p">(</span><span class="n">_msgSender</span><span class="p">(),</span> <span class="kt">address</span><span class="p">(</span><span class="nb">this</span><span class="p">)),</span> <span class="s">"item not approved"</span><span class="p">);</span>
+        <span class="p">}</span>
+</code></pre></div></div>
+
+<p>이 경우엔 Attacker가 1보다 높은 quantity를 사용하여 createListing 함수를 호출할 수 있어 예상치 못한 공격 포인트를 만들 수 있다. 
+그럼 실제 NFT를 구매하는 <code class="language-plaintext highlighter-rouge">buyItems</code> 함수를 살펴보자.</p>
+
+<div class="language-solidity highlighter-rouge"><div class="highlight"><pre class="highlight"><code>    <span class="k">function</span> <span class="n">buyItem</span><span class="p">(</span>
+        <span class="kt">address</span> <span class="n">_nftAddress</span><span class="p">,</span>
+        <span class="kt">uint256</span> <span class="n">_tokenId</span><span class="p">,</span>
+        <span class="kt">address</span> <span class="n">_owner</span><span class="p">,</span>
+        <span class="kt">uint256</span> <span class="n">_quantity</span>
+    <span class="p">)</span>
+        <span class="k">external</span>
+        <span class="n">nonReentrant</span>
+        <span class="n">isListed</span><span class="p">(</span><span class="n">_nftAddress</span><span class="p">,</span> <span class="n">_tokenId</span><span class="p">,</span> <span class="n">_owner</span><span class="p">)</span>
+        <span class="n">validListing</span><span class="p">(</span><span class="n">_nftAddress</span><span class="p">,</span> <span class="n">_tokenId</span><span class="p">,</span> <span class="n">_owner</span><span class="p">)</span>
+    <span class="p">{</span>
+        <span class="nb">require</span><span class="p">(</span><span class="n">_msgSender</span><span class="p">()</span> <span class="o">!=</span> <span class="n">_owner</span><span class="p">,</span> <span class="s">"Cannot buy your own item"</span><span class="p">);</span>
+
+        <span class="n">Listing</span> <span class="k">memory</span> <span class="n">listedItem</span> <span class="o">=</span> <span class="n">listings</span><span class="p">[</span><span class="n">_nftAddress</span><span class="p">][</span><span class="n">_tokenId</span><span class="p">][</span><span class="n">_owner</span><span class="p">];</span>
+        <span class="nb">require</span><span class="p">(</span><span class="n">listedItem</span><span class="p">.</span><span class="n">quantity</span> <span class="o">&gt;=</span> <span class="n">_quantity</span><span class="p">,</span> <span class="s">"not enough quantity"</span><span class="p">);</span>
+
+        <span class="c1">// Transfer NFT to buyer
+</span>        <span class="k">if</span> <span class="p">(</span><span class="n">IERC165</span><span class="p">(</span><span class="n">_nftAddress</span><span class="p">).</span><span class="n">supportsInterface</span><span class="p">(</span><span class="n">INTERFACE_ID_ERC721</span><span class="p">))</span> <span class="p">{</span>
+            <span class="n">IERC721</span><span class="p">(</span><span class="n">_nftAddress</span><span class="p">).</span><span class="n">safeTransferFrom</span><span class="p">(</span><span class="n">_owner</span><span class="p">,</span> <span class="n">_msgSender</span><span class="p">(),</span> <span class="n">_tokenId</span><span class="p">);</span>
+        <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+            <span class="n">IERC1155</span><span class="p">(</span><span class="n">_nftAddress</span><span class="p">).</span><span class="n">safeTransferFrom</span><span class="p">(</span><span class="n">_owner</span><span class="p">,</span> <span class="n">_msgSender</span><span class="p">(),</span> <span class="n">_tokenId</span><span class="p">,</span> <span class="n">_quantity</span><span class="p">,</span> <span class="kt">bytes</span><span class="p">(</span><span class="s">""</span><span class="p">));</span>
+        <span class="p">}</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="n">listedItem</span><span class="p">.</span><span class="n">quantity</span> <span class="o">==</span> <span class="n">_quantity</span><span class="p">)</span> <span class="p">{</span>
+            <span class="k">delete</span> <span class="p">(</span><span class="n">listings</span><span class="p">[</span><span class="n">_nftAddress</span><span class="p">][</span><span class="n">_tokenId</span><span class="p">][</span><span class="n">_owner</span><span class="p">]);</span>
+        <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+            <span class="n">listings</span><span class="p">[</span><span class="n">_nftAddress</span><span class="p">][</span><span class="n">_tokenId</span><span class="p">][</span><span class="n">_owner</span><span class="p">].</span><span class="n">quantity</span> <span class="o">-=</span> <span class="n">_quantity</span><span class="p">;</span>
+        <span class="p">}</span>
+
+        <span class="k">emit</span> <span class="n">ItemSold</span><span class="p">(</span>
+            <span class="n">_owner</span><span class="p">,</span>
+            <span class="n">_msgSender</span><span class="p">(),</span>
+            <span class="n">_nftAddress</span><span class="p">,</span>
+            <span class="n">_tokenId</span><span class="p">,</span>
+            <span class="n">_quantity</span><span class="p">,</span>
+            <span class="n">listedItem</span><span class="p">.</span><span class="n">pricePerItem</span>
+        <span class="p">);</span>
+
+        <span class="n">TreasureNFTOracle</span><span class="p">(</span><span class="n">oracle</span><span class="p">).</span><span class="n">reportSale</span><span class="p">(</span><span class="n">_nftAddress</span><span class="p">,</span> <span class="n">_tokenId</span><span class="p">,</span> <span class="n">paymentToken</span><span class="p">,</span> <span class="n">listedItem</span><span class="p">.</span><span class="n">pricePerItem</span><span class="p">);</span>
+        <span class="n">_buyItem</span><span class="p">(</span><span class="n">listedItem</span><span class="p">.</span><span class="n">pricePerItem</span><span class="p">,</span> <span class="n">_quantity</span><span class="p">,</span> <span class="n">_owner</span><span class="p">);</span>
+    <span class="p">}</span>
+</code></pre></div></div>
+<p>해당 함수의 경우 역시 ERC721에 대한 quantity 체크가 되어있지 않다. ERC721를 구매하고자 함수가 호출된 경우 수량이 1개인지 확인하는 require문이 필요했다. 해당 문제점은 2022년 2월 9일에 확인한 문제점인데 이 때에는 이런 수량문제가 크리티컬한 이슈로 번질지는 몰랐고, 수량을 체크하지 않음으로 인해 잠재적인 문제가 발생할 것이라는 점만 인지하였다.</p>
+
+<p>예를 들어, 판매자가 CreateListing을 통해 ERC721을 quantity를 10으로 하여 등록한 경우를 가정해보자. 그럼 구매자가 buyItem으로 quantity를 1로해서 구매할 때, 전송과 결제엔 아무런 문제도 없지만 <code class="language-plaintext highlighter-rouge">buyItem</code> 함수의 아래 코드로 인하여 기존 구조체가 남겨져있는 문제가 발생한다.</p>
+<div class="language-solidity highlighter-rouge"><div class="highlight"><pre class="highlight"><code>        <span class="k">if</span> <span class="p">(</span><span class="n">listedItem</span><span class="p">.</span><span class="n">quantity</span> <span class="o">==</span> <span class="n">_quantity</span><span class="p">)</span> <span class="p">{</span>
+            <span class="k">delete</span> <span class="p">(</span><span class="n">listings</span><span class="p">[</span><span class="n">_nftAddress</span><span class="p">][</span><span class="n">_tokenId</span><span class="p">][</span><span class="n">_owner</span><span class="p">]);</span>
+        <span class="p">}</span>
+</code></pre></div></div>
+<p>위 코드에선 구매자가 구매한 수량이 기존에 올라온 매물의 NFT 수량과 일치할 경우에만 기존 구조체 정보를 삭제하는데, 위의 시나리오에선 10 == 1 이 일하지 않아 delete문이 실행되지 않음으로써 쓰레기 구조체 정보가 남게된다.</p>
+
+<h3 id="실제-공격-취약점">실제 공격 취약점</h3>
+
+<p>위에서 발견한 ERC721에 대한 수량 체크 이슈는 2022년 2월 9일에 발견하여 해당 프로젝트의 <a href="https://github.com/TreasureProject/treasure-marketplace/discussions/162">Github Discussion</a>에 제출하였었다. 하지만 크리티컬한 이슈로 이어질 것을 예상하지 못했기 때문에 해당 팀에서는 큰 이슈로 판단을 하지 않았었고, 이는 3월 3일 대규모 공격으로 이어졌다.</p>
+
+<p>실제로 2022년 3월 3일 공격이 시행된 부분은 <code class="language-plaintext highlighter-rouge">_buyItem</code>에서 <code class="language-plaintext highlighter-rouge">_quantity</code>를 0으로 하여 돈을 지불하지 않고 NFT를 구매한 공격이 실행되었다. 이를 통해 약 100개 이상의 NFT가 탈취되었었다 (약 $1.4M 규모).</p>
+
+<div class="language-solidity highlighter-rouge"><div class="highlight"><pre class="highlight"><code>    <span class="k">function</span> <span class="n">_buyItem</span><span class="p">(</span>
+        <span class="kt">uint256</span> <span class="n">_pricePerItem</span><span class="p">,</span>
+        <span class="kt">uint256</span> <span class="n">_quantity</span><span class="p">,</span>
+        <span class="kt">address</span> <span class="n">_owner</span>
+    <span class="p">)</span> <span class="k">internal</span> <span class="p">{</span>
+        <span class="kt">uint256</span> <span class="n">totalPrice</span> <span class="o">=</span> <span class="n">_pricePerItem</span> <span class="o">*</span> <span class="n">_quantity</span><span class="p">;</span>
+        <span class="kt">uint256</span> <span class="n">feeAmount</span> <span class="o">=</span> <span class="n">totalPrice</span> <span class="o">*</span> <span class="n">fee</span> <span class="o">/</span> <span class="n">BASIS_POINTS</span><span class="p">;</span>
+        <span class="n">IERC20</span><span class="p">(</span><span class="n">paymentToken</span><span class="p">).</span><span class="n">safeTransferFrom</span><span class="p">(</span><span class="n">_msgSender</span><span class="p">(),</span> <span class="n">feeReceipient</span><span class="p">,</span> <span class="n">feeAmount</span><span class="p">);</span>
+        <span class="n">IERC20</span><span class="p">(</span><span class="n">paymentToken</span><span class="p">).</span><span class="n">safeTransferFrom</span><span class="p">(</span><span class="n">_msgSender</span><span class="p">(),</span> <span class="n">_owner</span><span class="p">,</span> <span class="n">totalPrice</span> <span class="o">-</span> <span class="n">feeAmount</span><span class="p">);</span>
+    <span class="p">}</span>
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">buyItem</code>에서 내부적으로 호출되는 <code class="language-plaintext highlighter-rouge">_buyItem</code> 함수에선 구매자가 판매자에게 돈을 지불하는 로직이 수행된다. 여기서도 수량에 대한 별도의 체크를 하지 않는다. 여기서 quantity를 0으로 했을 때 <code class="language-plaintext highlighter-rouge">totalPrice</code>는 0이 되어 <code class="language-plaintext highlighter-rouge">feeAmount</code>가 0이되어 구매자는 어떠한 자금도 지불하지 않게된다. 이를 통해 ERC721 토큰에 대해서 돈을 지불하지 않고 탈취가 가능하게 됐다. ERC1155는 이 공격에서 안전했는데, 아래 코드에서 보듯이 <code class="language-plaintext highlighter-rouge">buyItem</code> 함수에서 NFT를 transfer하는 과정에서 quantity가 0일 경우 어떠한 NFT도 전송하지 않기 때문이다. 즉 해당 공격은 ERC721에 대한 비정상적인 (이 케이스에선 수량을 0으로 했을 때) quantity 수치를 예외처리 하지 못해 발생하였다.</p>
+
+<div class="language-solidity highlighter-rouge"><div class="highlight"><pre class="highlight"><code>        <span class="c1">// Transfer NFT to buyer
+</span>        <span class="k">if</span> <span class="p">(</span><span class="n">IERC165</span><span class="p">(</span><span class="n">_nftAddress</span><span class="p">).</span><span class="n">supportsInterface</span><span class="p">(</span><span class="n">INTERFACE_ID_ERC721</span><span class="p">))</span> <span class="p">{</span>
+            <span class="n">IERC721</span><span class="p">(</span><span class="n">_nftAddress</span><span class="p">).</span><span class="n">safeTransferFrom</span><span class="p">(</span><span class="n">_owner</span><span class="p">,</span> <span class="n">_msgSender</span><span class="p">(),</span> <span class="n">_tokenId</span><span class="p">);</span>
+        <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+            <span class="n">IERC1155</span><span class="p">(</span><span class="n">_nftAddress</span><span class="p">).</span><span class="n">safeTransferFrom</span><span class="p">(</span><span class="n">_owner</span><span class="p">,</span> <span class="n">_msgSender</span><span class="p">(),</span> <span class="n">_tokenId</span><span class="p">,</span> <span class="n">_quantity</span><span class="p">,</span> <span class="kt">bytes</span><span class="p">(</span><span class="s">""</span><span class="p">));</span>
+        <span class="p">}</span>
+</code></pre></div></div>
+
+<p>해당 공격이 발생하고 나서 커뮤니티에선 왜 내가 이전에 제시한 버그 리포트를 무시했냐라는 비판이 나왔지만, 사실은 ERC721에 대한 수량체크 결여라는 부분이 같을 뿐 내가 작성한 [Dicussion]에서는 위와 같은 크리티컬한 이슈까지는 발견하지 못했다. 이 부분을 왜 발견하지 못했는지 정말 아쉬운 부분이다.</p>
+
+<p>정리하자면, 단순히 ERC721에 대한 수량 체크 require문을 하나 빼먹을 뿐인데, 돈을 지불하지 않고 NFT를 구매할 수 있는 치명적인 버그로 이어졌다. 스마트 컨트렉트에서 가장 중요한 부분은 보안이라는 것을 다시 한번 느끼게 된 사건이다.</p>
+
+<p>다행히도 탈취된 NFT들은 모두 원소유자들에게 반환되었고, 위에 설명한 취약점들은 현재 다 개선된 상태이다. TreasureDAO는 기존의 마켓플레이스를 Opensea와 같은 제너럴한 형태로 변형한 아비트럼의 대표 NFT 마켓플레이스인 <a href="https://trove.treasure.lol">Trove</a>를 운영중이다. 이 취약점 발견 이후로 TreasureDAO는 Peer Review/Audit 절차를 모든 프로덕트에 필수적으로 적용하도록 제품 출시 프로세스를 변경하였다. 커뮤니티원들과 투자자들은 프로덕트의 빠른 출시를 원하지만, 위 사례와 같은 치명적인 공격을 예방하기 위해선 Audit을 필수적으로 선행해야한다고 본다.</p>
+
+<h3 id="번외-erc721-lead-author와의-만남">번외, ERC721 Lead Author와의 만남</h3>
+<p>해당 버그 사태 이후에 ERC721의 Lead Author인 <a href="https://github.com/fulldecent">William Entriken</a>가 수정된 마켓플레이스에 대해 코드 리뷰어로 참여했다. ERC721의 주저자라길래 어떤식으로 코드 리뷰를 하나 살펴봤는데, 기본적인 리뷰부터 심층적인 리뷰에 이르기까지 리뷰의 정석을 보는 느낌이였다. 개발의 룰모델로 삼고싶을 정도이다. 해당 리뷰에 관심있는 분들은 William Entriken의 <a href="https://github.com/TreasureProject/treasure-marketplace-contracts/issues/25">full review</a>를 참고해보자. 정말 많은 공부가 된다.</p>
+
+<p>물론 나도 마켓플레이스 지불 토큰과 관련된 <a href="https://github.com/TreasureProject/treasure-marketplace-contracts/issues/3">시큐리티 이슈</a>를 하나 올려 기여를 하였다. 많이 부족하지만 앞으로 꾸준히 스마트 컨트렉트 분석/리뷰에 참여하며 실력을 키워나가고 싶다.</p>
+
+<p>추후엔 Trove, Opensea, Looksrare, X2Y2와 같은 마켓플레이스에 대한 코드를 검토하고 각 마켓플레이스의 설계가 어떻게 다른지 살펴보도록 하겠다.</p>
+
+:ET

@@ -156,8 +156,8 @@ yat:
 # Page default value
 defaults:
   home:
-    heading: "TEST"
-    subheading: "TEST"
+    heading: 
+    subheading:
     banner: "assets/images/banners/smol_banner.png"
 
 # Banner default settings

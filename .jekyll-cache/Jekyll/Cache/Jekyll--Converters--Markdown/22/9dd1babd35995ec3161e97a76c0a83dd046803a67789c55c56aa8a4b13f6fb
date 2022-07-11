@@ -1,0 +1,52 @@
+I"�<h3 id="treasure-nft-marketplace">Treasure NFT marketplace</h3>
+
+<p>이전 <a href="https://treasure.lol/">TreasureDAO</a> NFT 마켓플레이스를 예전에 분석했던 경험과, 이때 찾았던 취약점을 말해보고자 한다. 또한, 2022년 3월초에 실제로 NFT 자산들이 탈취된 <a href="https://news.bitcoin.com/attacker-hacks-arbitrums-treasure-dao-for-over-100-nfts-by-leveraging-marketplace-exploit/">공격</a>에 대해 설명해보고자 한다.</p>
+
+<p>기존 마켓플이스의 전체 코드는 Arbiscan에서의 <a href="https://arbiscan.io/address/0x812cda2181ed7c45a35a691e0c85e231d218e273#code">Contract</a>에서 확인해볼 수 있다. 우선 내가 처음 파악했던 문제점은 NFT를 리스팅 할 때 ERC721과 ERC1155에 대한 quantity 체크를 명확히 하지 않는 부분에 있다. 아래 코드를 보자.</p>
+
+<div class="language-c++ highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">function</span> <span class="nf">createListing</span><span class="p">(</span>
+        <span class="n">address</span> <span class="n">_nftAddress</span><span class="p">,</span>
+        <span class="n">uint256</span> <span class="n">_tokenId</span><span class="p">,</span>
+        <span class="n">uint256</span> <span class="n">_quantity</span><span class="p">,</span>
+        <span class="n">uint256</span> <span class="n">_pricePerItem</span><span class="p">,</span>
+        <span class="n">uint256</span> <span class="n">_expirationTime</span>
+    <span class="p">)</span> <span class="n">external</span> <span class="n">notListed</span><span class="p">(</span><span class="n">_nftAddress</span><span class="p">,</span> <span class="n">_tokenId</span><span class="p">,</span> <span class="n">_msgSender</span><span class="p">())</span> <span class="n">onlyWhitelisted</span><span class="p">(</span><span class="n">_nftAddress</span><span class="p">)</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">_expirationTime</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span> <span class="n">_expirationTime</span> <span class="o">=</span> <span class="n">type</span><span class="p">(</span><span class="n">uint256</span><span class="p">).</span><span class="n">max</span><span class="p">;</span>
+        <span class="n">require</span><span class="p">(</span><span class="n">_expirationTime</span> <span class="o">&gt;</span> <span class="n">block</span><span class="p">.</span><span class="n">timestamp</span><span class="p">,</span> <span class="s">"invalid expiration time"</span><span class="p">);</span>
+        <span class="n">require</span><span class="p">(</span><span class="n">_quantity</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">,</span> <span class="s">"nothing to list"</span><span class="p">);</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="n">IERC165</span><span class="p">(</span><span class="n">_nftAddress</span><span class="p">).</span><span class="n">supportsInterface</span><span class="p">(</span><span class="n">INTERFACE_ID_ERC721</span><span class="p">))</span> <span class="p">{</span>
+            <span class="n">IERC721</span> <span class="n">nft</span> <span class="o">=</span> <span class="n">IERC721</span><span class="p">(</span><span class="n">_nftAddress</span><span class="p">);</span>
+            <span class="n">require</span><span class="p">(</span><span class="n">nft</span><span class="p">.</span><span class="n">ownerOf</span><span class="p">(</span><span class="n">_tokenId</span><span class="p">)</span> <span class="o">==</span> <span class="n">_msgSender</span><span class="p">(),</span> <span class="s">"not owning item"</span><span class="p">);</span>
+            <span class="n">require</span><span class="p">(</span><span class="n">nft</span><span class="p">.</span><span class="n">isApprovedForAll</span><span class="p">(</span><span class="n">_msgSender</span><span class="p">(),</span> <span class="n">address</span><span class="p">(</span><span class="k">this</span><span class="p">)),</span> <span class="s">"item not approved"</span><span class="p">);</span>
+        <span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="p">(</span><span class="n">IERC165</span><span class="p">(</span><span class="n">_nftAddress</span><span class="p">).</span><span class="n">supportsInterface</span><span class="p">(</span><span class="n">INTERFACE_ID_ERC1155</span><span class="p">))</span> <span class="p">{</span>
+            <span class="n">IERC1155</span> <span class="n">nft</span> <span class="o">=</span> <span class="n">IERC1155</span><span class="p">(</span><span class="n">_nftAddress</span><span class="p">);</span>
+            <span class="n">require</span><span class="p">(</span><span class="n">nft</span><span class="p">.</span><span class="n">balanceOf</span><span class="p">(</span><span class="n">_msgSender</span><span class="p">(),</span> <span class="n">_tokenId</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="n">_quantity</span><span class="p">,</span> <span class="s">"must hold enough nfts"</span><span class="p">);</span>
+            <span class="n">require</span><span class="p">(</span><span class="n">nft</span><span class="p">.</span><span class="n">isApprovedForAll</span><span class="p">(</span><span class="n">_msgSender</span><span class="p">(),</span> <span class="n">address</span><span class="p">(</span><span class="k">this</span><span class="p">)),</span> <span class="s">"item not approved"</span><span class="p">);</span>
+        <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+            <span class="n">revert</span><span class="p">(</span><span class="s">"invalid nft address"</span><span class="p">);</span>
+        <span class="p">}</span>
+
+        <span class="n">listings</span><span class="p">[</span><span class="n">_nftAddress</span><span class="p">][</span><span class="n">_tokenId</span><span class="p">][</span><span class="n">_msgSender</span><span class="p">()]</span> <span class="o">=</span> <span class="n">Listing</span><span class="p">(</span>
+            <span class="n">_quantity</span><span class="p">,</span>
+            <span class="n">_pricePerItem</span><span class="p">,</span>
+            <span class="n">_expirationTime</span>
+        <span class="p">);</span>
+
+        <span class="n">emit</span> <span class="n">ItemListed</span><span class="p">(</span>
+            <span class="n">_msgSender</span><span class="p">(),</span>
+            <span class="n">_nftAddress</span><span class="p">,</span>
+            <span class="n">_tokenId</span><span class="p">,</span>
+            <span class="n">_quantity</span><span class="p">,</span>
+            <span class="n">_pricePerItem</span><span class="p">,</span>
+            <span class="n">_expirationTime</span>
+        <span class="p">);</span>
+    <span class="p">}</span>
+</code></pre></div></div>
+<h3 id="erc721과-erc1155">ERC721과 ERC1155</h3>
+
+<p>지금 설명하는 취약점들은 현재 다 개선된 상태이며, TreasureDAO는 아비트럼의 대표 NFT 마켓플레이스인 <a href="https://trove.treasure.lol">Trove</a>를 운영중이다.</p>
+
+<p>Check out the <a href="https://jekyllrb.com/docs/home">Jekyll docs</a> for more info on how to get the most out of Jekyll. File all bugs/feature requests at <a href="https://github.com/jekyll/jekyll">Jekyll’s GitHub repo</a>. If you have questions, you can ask them on <a href="https://talk.jekyllrb.com/">Jekyll Talk</a>.</p>
+
+:ET

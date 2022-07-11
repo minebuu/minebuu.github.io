@@ -156,8 +156,8 @@ yat:
 # Page default value
 defaults:
   home:
-    heading: ""
-    subheading: ""
+    heading: "Web3 Dev"
+    subheading: "EEEEEEE"
     banner: "assets/images/banners/smol_banner.png"
 
 # Banner default settings

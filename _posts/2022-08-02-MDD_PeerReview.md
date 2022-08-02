@@ -1,0 +1,251 @@
+---
+layout: post
+title:  "Magic Dragon DAO 업그레이드 코드 Audit"
+date:   2022-08-05 07:03:31 +0900
+categories: blockchain
+---
+
+### Magic Dragon DAO
+
+이전 포스팅에서 작성한 MDD 취약점 발견 이후 약 2주가 지난 시점에서 새로운 코드가 업데이트 되었다. 저번 문제점을 발견한데 도와준만큼, 해당 코드의 개발자인 [kvk0x](https://twitter.com/kvk0x)가 peer review를 요청하게되었고 이번 audit을 도와주게 되었다. 이번 포스팅에선 변경 사항들을 살펴보고 peer review 내용을 공유하고자 한다.  
+
+<p style="text-align: center;">
+	<img src="{{ site.url }}/assets/images/mdd_request.png" alt="Drawing" style="max-width: 80%; height: auto;"/>
+</p>
+
+우선 이번 패치 사항은 [Github](https://github.com/MagicDragonDao/contracts/pull/5) 해당 링크에서 확인할 수 있으며, 구체적인 구현 사항은 [Medium 글](https://magicdragondao.medium.com/magic-dragon-dao-and-the-arbitrum-gas-battle-9914b137ccae)을 따라 구현되었다.
+
+주요 변경점을 살펴보자면 다음과 같다.
+1. 보상이 실시간으로 누적되지 않고,
+2.
+3.
+
+코드가 변경된 부분은 github에서도 확인이 가능하지만, [Differchecker_MDD](https://www.diffchecker.com/Jk8V2VEg)에서도 확인이 가능하다.
+
+### Peer Review
+1. _isAccrualWindow()에서 accrualWindows.length가 홀수일 때에 대한 예외 처리 필요 => setAccrualWindows에서 예외 처리 했음
+2. setAccrualWindows에서 값을 넣었다가 빈값을 넣어서 빈 값이 덮어쓰기가 되는지 체크 필요 => 덮어쓰기가 안된다면 기존 값 delete 필요
+=> unit Test 결과 덮어쓰기 됨.
+
+3. setAccrualWindows를 통해 window 시간 값을 변경할 때 문제가 발생하지는 않는가?
+
+4.
+
+# 배경
+1) 아비트럼 네트워크의 트랜잭션 증가로 인한 가스 비용 증가
+
+2) MDD staking 컨트렉트는 24시간마다 유저들의 Deposit 수량을 모아 외부 컨트렉트인 Atlas Mine 컨트렉트에 스테이킹하는데, 이때마다 새로운 Deposit 구조체가 생성. 유저가 MDD 스테이킹 컨트렉트와 상호작용 (Deposit, Withdraw, Claim) 할 때마다, 생성된 모든 Deposit 구조체에 대해서 Reward를 수확하는 harvestAll 외부 함수가 호출되기 때문에 유저가 지출해야하는 가스비가 계속적으로 증가   
+
+3) 현재 아비트럼 네트워크엔 [arbitrum speed limit](https://developer.offchainlabs.com/docs/arbgas) 수치가 존재함. 1초 당 gas 수치가 2.4M을 넘을 수 없음
+
+4) 지속적으로 증가하는 Deposit 구조체로 인해 특정 시점부터 MDD에서 외부 컨트렉트인 Atlas Mine의 harvestAll() 외부 함수를 호출할 때 가스비가 아비트럼의 gas limit을 넘어섬 (out-of-gas)  
+
+# Result
+1) MDD 스테이킹 풀에서 updateRewards() 함수가 정확히 동작하지 않음 (위 out-of-gas 문제). 이로 인해 accRewardsPerShare 변수 값이 업데이트 되지 않음. accRewardsPerShare 변수는
+ 업데이트 되지 않는 상황에선 보상이 누적되지 않는 현상이 발생함
+
+2) Withdraw 함수에서 호출하는 updateRewards() 함수 역시 제대로 동작하지 않기 때문에, accRewardsPerShare 값이 정상적으로 업데이트 되지 않음. 따라서 유저는 실시간 보상을 받는 것이 아닌, 이전 업데이트 되지 않은 accRewardsPerShare 값을 기준으로 보상을 받게 됨. 또한 Withdraw 함수 후 유저의 Deposit 구조체의 amount는 0으로 변하므로, 미정산된 보상을 추후 클레임할 수 없음.
+
+3) Deposit 함수 역시 업데이트 되지 않는 accRewardsPerShare 변수를 사용하여 rewardDebt 값을 계산. 해당 rewardDebt 값이 업데이트 되지 않는 accRewardsPerShare 변수를 통해 계산됨으로써 보다 작은 값을 지니게 되고, 이는 새로운 Deposit 함수를 호출하는 사람들이 추후 실제보다 더 많은 보상을 받아갈 수 있는 문제가 발생할 수 있음  
+
+### Detail Report  
+
+우선 updateRewards() 함수에 대해 살펴볼 필요가 있다. 해당 함수는 Deposit, Withdraw, WithdrawAll, Claim 함수 내부에서 Require() 조건 검사문 다음으로 바로 호출되는 함수로써 코드는 다음과 같다. 주석에도 설명되어 있듯이 _harvestMine() 함수 호출을 통해 외부 컨트렉트인 Atlas Mine에 예치한 자금에 대해 rewards를 claim한다.
+
+```solidity
+/**
+ * @dev Harvest rewards from the mine so that stakers can claim.
+ *      Recalculate how many rewards are distributed to each share.
+ */
+function _updateRewards() internal {
+    if (totalStaked == 0) return;
+
+    (uint256 newRewards, ) = _harvestMine();
+    totalRewardsEarned += newRewards;
+
+    accRewardsPerShare += (newRewards * ONE) / totalStaked;
+}
+
+/**
+ * @dev Harvest rewards from the AtlasMine and send them back to
+ *      this contract.
+ *
+ * @return earned               The amount of rewards earned for depositors, minus the fee.
+ * @return feeEearned           The amount of fees earned for the contract operator.
+ */
+function _harvestMine() internal returns (uint256, uint256) {
+    uint256 preclaimBalance = magic.balanceOf(address(this));
+
+    try mine.harvestAll() {
+        uint256 postclaimBalance = magic.balanceOf(address(this));
+
+        uint256 earned = postclaimBalance - preclaimBalance;
+
+        // Reserve the 'fee' amount of what is earned
+        uint256 feeEarned = (earned * fee) / FEE_DENOMINATOR;
+        feeReserve += feeEarned;
+
+        emit MineHarvest(earned - feeEarned, feeEarned);
+
+        return (earned - feeEarned, feeEarned);
+    } catch {
+        // Failed because of reward debt calculation - should be 0
+        return (0, 0);
+    }
+}
+
+```
+
+_harvestMine() 함수의 내부를 살펴보면 try/catch 구조를 통해 mine.harvestAll() external 함수를 호출한다. 여기서 mine은 TreasrueDAO의 Atlas Mine 스테이킹 컨트렉트이고, harvsetAll()은 함수 호출자가 가진 모든 Deposit 구조체에 대해 모든 reward를 claim하는 함수이다 (즉, 많은 Deposit 구조체를 가질 수록 함수 호출 시 gas 소모량이 증가하며 이번 취약점의 문제가 된다). 관련 코드는 [atlas mine arbiscan code](https://arbiscan.io/address/0xa0a89db1c899c49f98e6326b764bafcf167fc2ce#readProxyContract)에서 확인가능하다. 이 외부 함수 호출이 정상적으로 실행될 시에는 `(유저들에게 돌아갈 Reward 수량, 프로토콜 Fee)`를 return 하고, 외부 컨트렉트 함수 호출이 실패할 시에는 `return (0, 0)`을 수행한다.
+
+Try/Catch 문에 대해 더 자세히 살펴보자. [Try/Catch문은 solidity 0.6](https://docs.soliditylang.org/en/latest/control-structures.html#try-catch)부터 도입된 기능으로 외부 호출의 실패를 포착할 수 있다. 다만 Note에 명시된 대로, caller contract는 external 함수를 호출할 때 최소 1/64 이상의 가스를 남겨놓는다. 따라서 외부 함수 호출이 out-of-gas 문제로 실패하더라도, 가스가 남기 때문에 catch문 이후 로직 수행이 진행된다.       
+
+MDD에서는 mine.harvestAll()이 실패하여 catch문이 실행됐을 때 (0,0)을 return하는데, out-of-gas로 mine.harvestAll()가 실패하더라도 코드는 계속 실행된다. 따라서 updateRewards 함수에서 호출한 _harvestMine은 (0,0)을 반환하고, accRewardsPerShare 값에는 변동이 없게된다.
+
+현재의 MDD 컨트렉트 구조는 Deposit과 Withdraw 그리고 Claim 함수 모두 최신의 accRewardsPerShare 값이 반영되었다는 가정을 기반으로 논리가 수행되므로, accRewardsPerShare 값이 업데이트 되지 않는 문제는 여러 취약점을 생성할 수 있다. 아래 코드를 살펴보자
+
+```solidity
+/**
+ * @notice Make a new deposit into the Staker. The Staker will collect
+ *         the tokens, to be later staked in atlas mine by the owner,
+ *         according to the stake/unlock schedule.
+ * @dev    Specified amount of token must be approved by the caller.
+ *
+ * @param _amount               The amount of tokens to deposit.
+ */
+function deposit(uint256 _amount) public virtual override nonReentrant {
+    require(!schedulePaused, "new staking paused");
+    require(_amount > 0, "Deposit amount 0");
+
+    _updateRewards(); // 문제가 되는 부분. out-of-gas로 인해 accRewardsPerShare 값이 변하지 않는다.  
+
+    // Add user stake
+    uint256 newDepositId = ++currentId[msg.sender];
+    allUserDepositIds[msg.sender].add(newDepositId);
+    UserStake storage s = userStake[msg.sender][newDepositId];
+
+    s.amount = _amount;
+    s.unlockAt = block.timestamp + locktime + 1 days;
+    // _updateRewards()가 제대로 수행되지 않을 경우 rewardDebt는 변경되지 않은 accRewardsPerShare 값을 기반으로 계산된다.
+    // 이는 _withdraw()에서 해당 변수가 재사용될때 비정상적인 리워드를 발생시킨다.
+    s.rewardDebt = ((_amount * accRewardsPerShare) / ONE).toInt256();
+
+    // Update global accounting
+    totalStaked += _amount;
+    unstakedDeposits += _amount;
+
+    // Collect tokens
+    magic.safeTransferFrom(msg.sender, address(this), _amount);
+
+    // MAGIC tokens sit in contract. Added to pending stakes
+    emit UserDeposit(msg.sender, _amount);
+}
+```
+
+위 코드에서 _updateRewards()는 앞서 말한대로 out-of-gas 문제로 정상적으로 동작하지 않는다. 따라서 accRewardsPerShare 값이 변하지 않는 채로 남겨진다. 문제는 s.rewardDebt 값을 계산할 때 업데이트 되지 않은 accRewardsPerShare 값을 통해 계산되는데, 이 rewardDebt 변수가 추후 _withdraw()에서 비정상적인 리워드를 발생시킨다. 그럼 _withdraw()에서 어떤 문제가 발생하는지 살펴보자.
+
+reward를 계산하는 부분을 살펴보면 `reward = (accumulatedRewards - s.rewardDebt).toUint256();`와 같다. `(accumulatedRewards - s.rewardDebt)` 부분을 좀 더 풀어쓰자면, `s.amount*출금시점_accRewardsPerShare - s.amount*입금시점_accRewardsPerShare)`이다. 즉 입금시점과 출금시점의 accRewardsPerShare에 따라 reward가 변하게 된다. 입금시점의 accRewardsPerShare 값이 정상 값보다 낮다면 더 높은 보상을 받을 것이고, 반대로 출금 시점의 accRewardsPerShare 값이 정상 값보다 낮다면 더 낮은 보상을 받을 것이다. 이는 accRewardsPerShare 값이 증가하지 않는 현 상황에서 기존의 스테이킹 유저들이 출금을 진행할 시 더 낮은 `출금시점_accRewardsPerShare` 값을 갖는 걸 의미하므로 보상이 누락되게된다. 반대로, 지금 새로운 Deposit()을 수행하는 유저들은 더 낮은 `입금시점_accRewardsPerShare` 값을 갖게 되므로 추후 accRewardsPerShare 값이 제대로 복구된 후 withdraw()를 수행한다면 더 높은 보상을 챙기게 된다.   
+
+```solidity
+/**
+ * @dev Logic for withdrawing a deposit. Calculates pro rata share of
+ *      accumulated MAGIC and distributes any earned rewards in addition
+ *      to original deposit.
+ *
+ * @dev An _amount argument larger than the total deposit amount will
+ *      withdraw the entire deposit.
+ *
+ * @param s                     The UserStake struct to withdraw from.
+ * @param depositId             The ID of the deposit to withdraw from (for event).
+ * @param _amount               The amount to withdraw.
+ */
+function _withdraw(
+    UserStake storage s,
+    uint256 depositId,
+    uint256 _amount
+) internal returns (uint256 payout) {
+    require(_amount > 0, "Withdraw amount 0");
+
+    if (_amount > s.amount) {
+        _amount = s.amount;
+    }
+
+    // Update user accounting
+    int256 accumulatedRewards = ((s.amount * accRewardsPerShare) / ONE).toInt256();
+    uint256 reward;
+
+    //취약점이 발생하는 부분.
+    if (s.rewardDebt < accumulatedRewards) {
+        reward = (accumulatedRewards - s.rewardDebt).toUint256();
+    }
+
+    payout = _amount + reward;
+
+    s.amount -= _amount;
+    s.rewardDebt = ((s.amount * accRewardsPerShare) / ONE).toInt256();
+
+    // Update global accounting
+    totalStaked -= _amount;
+
+    // If we need to unstake, unstake until we have enough
+    uint256 totalUsableMagic = _totalUsableMagic();
+    if (payout > totalUsableMagic) {
+        _unstakeToTarget(payout - totalUsableMagic);
+    }
+
+    // Decrement unstakedDeposits based on how much we are withdrawing
+    // If we are withdrawing more than is currently unstaked, set it to 0
+    if (_amount >= unstakedDeposits) {
+        unstakedDeposits = 0;
+    } else {
+        unstakedDeposits -= _amount;
+    }
+
+    emit UserWithdraw(msg.sender, depositId, _amount, reward);
+}
+
+```
+
+예시를 들어보자. 현재 글 작성 시점으로 4일전부터 mine.harvestAll() 함수 호출이 out-of-gas 문제로 실패하여 accRewardsPerShare 값이 업데이트 되지 않고 있다. 만약 지금 기존 스테이킹 유저가 Withdraw()를 호출을 한다면 4일전의 멈춘 accRewardsPerShare 값으로 계산되기 때문에, 4일간의 최신 보상이 누락된다. 반대로, 새로운 스테이킹 유저가 Deposit() 함수를 호출한다면 4일전의 멈춘 accRewardsPerShare 값으로 Deposit 스타팅 시점이 계산되기 때문에 오늘 스테이킹을 했음에도 불구하고 4일전의 스테이킹을 한 것으로 기록되 추후 accRewardsPerShare 값이 정상적으로 돌아오고 출금을 진행하면 4일의 스테이킹 리워드를 초과로 얻게되는 부정이익이 발생한다.          
+
+결론적으로, 최근 아비트럼 체인의 Gas fee가 증가하고, MDD 컨트렉트에서 AtlasMine Contract에 매24시간마다 생성하는 Deposit 구조체가 증가함으로써 mine.harvestAll() external 함수 호출에서 out-of-gas가 발생하였다. 이 경우에 대한 대처로 _harvestMine() 함수는 단순 (0,0) 값을 반환함으로써 최신의 accRewardsPerShare 값이 업데이트 되지 않게되었고, 이 변수를 기반으로 보상을 산정하는 Deposit, Withdraw, Claim 함수에서 보상이 정상적으로 계산되지 않는 취약점이 발생하였다.
+
+### 사후처리
+해당 취약점을 발견한 후 디스코드를 통해 MDD 개발자와 연락하여 위의 사실을 바로 알렸다. MDD의 개발자인 [kvk0x](https://twitter.com/kvk0x)는 바로 해당 사실을 인지하고, 디스코드에 사후 대처에 대한 방안을 올렸다. MDD 개발자에게 보고한 시점엔 이미 accRewardsPerShare 변수가 업데이트 되지 않고 있었고, 이 시점 이후 Withdraw()를 호출한 사람들이 있었기 때문에 위의 취약점에 영향을 받을 수 밖에 없었다. MDD 팀은 트랜잭션 분석을 통해 이런 누락 MAGIC reward에 영향을 받은 사람들을 찾아내고, 수동으로 보상해주기로 결정하였다.
+
+또한 임시방편으로, Deposit은 일시적으로 중단시켰고, Withdraw()함수 내 _updateRewards() 함수를 삭제함으로써 Withdraw시 out-of-gas문제를 피하도록 변경하였다. 다만 _updateRewards() 함수가 호출되지 않기 때문에 새로운 reward를 수확하지 않게되고, 사용자는 out-of-gas 문제가 발생한 시점 전의 Reward에 대해서만 Claim할 수 있도록 변경되다.
+
+아래는 개발자에게 연락하던 과정과, 실제로 MDD 디스코드에 해당 오류와 관련된 대처 [공지](https://discord.com/channels/934927457339965460/935558047428919326/999182835980185700)를 올린 사진이다. 두번째 사진을 보면 위 취약점을 제보한 덕분에 내 디스코드 아이디인 `@Minebuu`가 태그된 것을 확인 할 수 있다.
+
+<p style="text-align: center;">
+	<img src="{{ site.url }}/assets/images/mdd_chat.png" alt="Drawing" style="max-width: 80%; height: auto;"/>
+</p>
+
+<p style="text-align: center;">
+	<img src="{{ site.url }}/assets/images/mdd_anon.png" alt="Drawing" style="max-width: 80%; height: auto;"/>
+</p>
+
+MDD 팀은 근본적인 스테이킹 논리 구조를 변경하기 결정하였다. 기존엔 updateRewards() 함수가 유저가 Deposit, Withdraw, Claim 할 때마다 호출되었고, 지속적으로 증가하는 Deposit 구조체 때문에 updateRewards() 함수의 gas fee가 증가하여 out-of-gas문제로 revert되는 경우가 발생하였다. 따라서 여러번의 transaction으로 나눠 모든 deposit에 대해 harvest() 함수를 수행하기로 결정하였다. 이렇게 되면 out-of-gas를 걱정하지 않아도 된다. 다만, 이 시점동안엔 사용자들이 리워드를 클레임 할 수 없도록 변경된다.
+
+자세한 사항이 궁금한 사람들은 [Magic Dragon Dao and the Arbitrum gas battle](https://magicdragondao.medium.com/magic-dragon-dao-and-the-arbitrum-gas-battle-9914b137ccae) 미디엄 공지를 참고하길 바란다.
+
+
+
+
+
+
+
+
+
+
+
+[MagicDragonDAO]: https://magicdragon.lol/
+[TreasureDAO]: https://treasure.lol/
+[Trove]:   https://trove.treasure.lol
+[MDD Contract]: https://arbiscan.io/address/0xa094629baae6af0c43f17f434b975337cbdb3c42#code
+[공격]:https://news.bitcoin.com/attacker-hacks-arbitrums-treasure-dao-for-over-100-nfts-by-leveraging-marketplace-exploit/
+[Tend]: https://dashboard.tenderly.co/
+[Discussion]: https://github.com/TreasureProject/treasure-marketplace/discussions/162
+[William Entriken]: https://github.com/fulldecent
+[시큐리티 이슈]: https://github.com/TreasureProject/treasure-marketplace-contracts/issues/3
+[full review]: https://github.com/TreasureProject/treasure-marketplace-contracts/issues/25

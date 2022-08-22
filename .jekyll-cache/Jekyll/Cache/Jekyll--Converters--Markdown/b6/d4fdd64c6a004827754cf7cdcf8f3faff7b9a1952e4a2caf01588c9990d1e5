@@ -1,0 +1,4 @@
+I"�<h3 id="foundry">Foundry</h3>
+<p>기존의 스마트컨트렉트 개발은 <a href="https://trufflesuite.com/">Truffle</a>, [hardhat] 등의 툴을 사용하여 개발을 하였습니다. 특히 테스트를 위해선 Hardhat을 통하여 많이 진행했는데, Paradim에서 개발한 <a href="https://github.com/foundry-rs/foundry">Foundry</a>가 이러한 테스트에 새로운 대안으로 등장하였습니다.</p>
+
+:ET

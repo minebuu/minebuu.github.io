@@ -1,0 +1,204 @@
+I"�n<h3 id="magic-dragon-dao">Magic Dragon DAO</h3>
+
+<p>최근 이더리움 L2 체인인 아비트럼 네트워크의 거래 TX수가 증가하면서 전체적인 네트워크의 가스비가 증가하였다. 이로 인해, <a href="https://magicdragon.lol/">MagicDragonDAO</a>의 스테이킹 풀에서 발생했던 취약점을 분석하고 설명해보고자 한다. 간단히 MDD에 대해 설명하자면, <a href="https://www.convexfinance.com/">Convex</a> 프로토콜이 <a href="https://curve.fi/">Curve</a> 프로토콜에서 개인보다 나은 CRV 토큰 수확량을 얻기 위해 집단적으로 스테이킹하도록 설계된 것처럼, MDD는 <a href="https://treasure.lol/">TreasureDAO</a>의 MAGIC 스테이킹 풀에서 개인보다 나은 최대한의 MAGIC 수확량을 얻기 위한 길드이자 프로토콜이다. 따라서 MDD의 스테이킹 풀은 개인의 MAGIC 토큰들을 모아서 TreasureDAO의 Atlas Mine 컨트렉트에 예치하고, 스테이킹 수량과 기간에 따라 비례하는 Magic 토큰 보상을 예치자들에게 제공한다. TreausreDAO의 Atlas Mine 스테이킹은 단순히 락 기간에 따라 보상의 수량을 더 주는 것이 아닌 NFT 스테이킹에 따른 리워드 부스팅을 지원하기 때문에, 희귀도가 높은 NFT를 해당 스테이킹 풀에 예치하면 더 높은 보상을 챙길 수 있다. MDD는 길드로서 개인보다 희귀도가 높은 NFT를 많이 보유하고 있어 높은 부스팅 파워를 가진 스테이킹 풀을 제공한다.</p>
+
+<p>이번 취약점 분석의 대상이 되는 MDD Contract는 <a href="https://arbiscan.io/address/0xa094629baae6af0c43f17f434b975337cbdb3c42#code">MDD Contract</a>에서 확인해볼 수 있다. 해당 컨트렉트는 Upgradable Proxy 컨트렉트이므로 추후 취약점이 수정된 코드로 바뀔 수 있다. 추후 수정된 후에도 현재 글 작성 시점에 취약점이 존재하는 코드를 보고싶다면 <a href="https://arbiscan.io/address/0x34309466f9abb1cf85d9a805eb9421400223aca9#code"> AtlasMineStakerUpgradeable.sol</a>에서 확인 가능하다.</p>
+
+<h3 id="취약점-요약">취약점 요약</h3>
+
+<h1 id="배경">배경</h1>
+<p>1) 아비트럼 네트워크의 트랜잭션 증가로 인한 가스 비용 증가</p>
+
+<p>2) MDD staking 컨트렉트는 24시간마다 유저들의 Deposit 수량을 모아 외부 컨트렉트인 Atlas Mine 컨트렉트에 스테이킹하는데, 이때마다 새로운 Deposit 구조체가 생성. 유저가 MDD 스테이킹 컨트렉트와 상호작용 (Deposit, Withdraw, Claim) 할 때마다, 생성된 모든 Deposit 구조체에 대해서 Reward를 수확하는 harvestAll 외부 함수가 호출되기 때문에 유저가 지출해야하는 가스비가 계속적으로 증가</p>
+
+<p>3) 현재 아비트럼 네트워크엔 <a href="https://developer.offchainlabs.com/docs/arbgas">arbitrum speed limit</a> 수치가 존재함. 1초 당 gas 수치가 2.4M을 넘을 수 없음</p>
+
+<p>4) 지속적으로 증가하는 Deposit 구조체로 인해 특정 시점부터 MDD에서 외부 컨트렉트인 Atlas Mine의 harvestAll() 외부 함수를 호출할 때 가스비가 아비트럼의 gas limit을 넘어섬 (out-of-gas)</p>
+
+<h1 id="result">Result</h1>
+<p>1) MDD 스테이킹 풀에서 updateRewards() 함수가 정확히 동작하지 않음 (위 out-of-gas 문제). 이로 인해 accRewardsPerShare 변수 값이 업데이트 되지 않음. accRewardsPerShare 변수는
+ 업데이트 되지 않는 상황에선 보상이 누적되지 않는 현상이 발생함</p>
+
+<p>2) Withdraw 함수에서 호출하는 updateRewards() 함수 역시 제대로 동작하지 않기 때문에, accRewardsPerShare 값이 정상적으로 업데이트 되지 않음. 따라서 유저는 실시간 보상을 받는 것이 아닌, 이전 업데이트 되지 않은 accRewardsPerShare 값을 기준으로 보상을 받게 됨. 또한 Withdraw 함수 후 유저의 Deposit 구조체의 amount는 0으로 변하므로, 미정산된 보상을 추후 클레임할 수 없음.</p>
+
+<p>3) Deposit 함수 역시 업데이트 되지 않는 accRewardsPerShare 변수를 사용하여 rewardDebt 값을 계산. 해당 rewardDebt 값이 업데이트 되지 않는 accRewardsPerShare 변수를 통해 계산됨으로써 보다 작은 값을 지니게 되고, 이는 새로운 Deposit 함수를 호출하는 사람들이 추후 실제보다 더 많은 보상을 받아갈 수 있는 문제가 발생할 수 있음</p>
+
+<h3 id="detail-report">Detail Report</h3>
+
+<p>우선 updateRewards() 함수에 대해 살펴볼 필요가 있다. 해당 함수는 Deposit, Withdraw, WithdrawAll, Claim 함수 내부에서 Require() 조건 검사문 다음으로 바로 호출되는 함수로써 코드는 다음과 같다. 주석에도 설명되어 있듯이 _harvestMine() 함수 호출을 통해 외부 컨트렉트인 Atlas Mine에 예치한 자금에 대해 rewards를 claim한다.</p>
+
+<div class="language-solidity highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="cm">/**
+ * @dev Harvest rewards from the mine so that stakers can claim.
+ *      Recalculate how many rewards are distributed to each share.
+ */</span>
+<span class="k">function</span> <span class="n">_updateRewards</span><span class="p">()</span> <span class="k">internal</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">totalStaked</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span> <span class="k">return</span><span class="p">;</span>
+
+    <span class="p">(</span><span class="kt">uint256</span> <span class="n">newRewards</span><span class="p">,</span> <span class="p">)</span> <span class="o">=</span> <span class="n">_harvestMine</span><span class="p">();</span>
+    <span class="n">totalRewardsEarned</span> <span class="o">+=</span> <span class="n">newRewards</span><span class="p">;</span>
+
+    <span class="n">accRewardsPerShare</span> <span class="o">+=</span> <span class="p">(</span><span class="n">newRewards</span> <span class="o">*</span> <span class="n">ONE</span><span class="p">)</span> <span class="o">/</span> <span class="n">totalStaked</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="cm">/**
+ * @dev Harvest rewards from the AtlasMine and send them back to
+ *      this contract.
+ *
+ * @return earned               The amount of rewards earned for depositors, minus the fee.
+ * @return feeEearned           The amount of fees earned for the contract operator.
+ */</span>
+<span class="k">function</span> <span class="n">_harvestMine</span><span class="p">()</span> <span class="k">internal</span> <span class="k">returns</span> <span class="p">(</span><span class="kt">uint256</span><span class="p">,</span> <span class="kt">uint256</span><span class="p">)</span> <span class="p">{</span>
+    <span class="kt">uint256</span> <span class="n">preclaimBalance</span> <span class="o">=</span> <span class="n">magic</span><span class="p">.</span><span class="n">balanceOf</span><span class="p">(</span><span class="kt">address</span><span class="p">(</span><span class="nb">this</span><span class="p">));</span>
+
+    <span class="k">try</span> <span class="n">mine</span><span class="p">.</span><span class="n">harvestAll</span><span class="p">()</span> <span class="p">{</span>
+        <span class="kt">uint256</span> <span class="n">postclaimBalance</span> <span class="o">=</span> <span class="n">magic</span><span class="p">.</span><span class="n">balanceOf</span><span class="p">(</span><span class="kt">address</span><span class="p">(</span><span class="nb">this</span><span class="p">));</span>
+
+        <span class="kt">uint256</span> <span class="n">earned</span> <span class="o">=</span> <span class="n">postclaimBalance</span> <span class="o">-</span> <span class="n">preclaimBalance</span><span class="p">;</span>
+
+        <span class="c1">// Reserve the 'fee' amount of what is earned
+</span>        <span class="kt">uint256</span> <span class="n">feeEarned</span> <span class="o">=</span> <span class="p">(</span><span class="n">earned</span> <span class="o">*</span> <span class="n">fee</span><span class="p">)</span> <span class="o">/</span> <span class="n">FEE_DENOMINATOR</span><span class="p">;</span>
+        <span class="n">feeReserve</span> <span class="o">+=</span> <span class="n">feeEarned</span><span class="p">;</span>
+
+        <span class="k">emit</span> <span class="n">MineHarvest</span><span class="p">(</span><span class="n">earned</span> <span class="o">-</span> <span class="n">feeEarned</span><span class="p">,</span> <span class="n">feeEarned</span><span class="p">);</span>
+
+        <span class="k">return</span> <span class="p">(</span><span class="n">earned</span> <span class="o">-</span> <span class="n">feeEarned</span><span class="p">,</span> <span class="n">feeEarned</span><span class="p">);</span>
+    <span class="p">}</span> <span class="k">catch</span> <span class="p">{</span>
+        <span class="c1">// Failed because of reward debt calculation - should be 0
+</span>        <span class="k">return</span> <span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">);</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+
+</code></pre></div></div>
+
+<p>_harvestMine() 함수의 내부를 살펴보면 try/catch 구조를 통해 mine.harvestAll() external 함수를 호출한다. 여기서 mine은 TreasrueDAO의 Atlas Mine 스테이킹 컨트렉트이고, harvsetAll()은 함수 호출자가 가진 모든 Deposit 구조체에 대해 모든 reward를 claim하는 함수이다 (즉, 많은 Deposit 구조체를 가질 수록 함수 호출 시 gas 소모량이 증가하며 이번 취약점의 문제가 된다). 관련 코드는 <a href="https://arbiscan.io/address/0xa0a89db1c899c49f98e6326b764bafcf167fc2ce#readProxyContract">atlas mine arbiscan code</a>에서 확인가능하다. 이 외부 함수 호출이 정상적으로 실행될 시에는 <code class="language-plaintext highlighter-rouge">(유저들에게 돌아갈 Reward 수량, 프로토콜 Fee)</code>를 return 하고, 외부 컨트렉트 함수 호출이 실패할 시에는 <code class="language-plaintext highlighter-rouge">return (0, 0)</code>을 수행한다.</p>
+
+<p>Try/Catch 문에 대해 더 자세히 살펴보자. <a href="https://docs.soliditylang.org/en/latest/control-structures.html#try-catch">Try/Catch문은 solidity 0.6</a>부터 도입된 기능으로 외부 호출의 실패를 포착할 수 있다. 다만 Note에 명시된 대로, caller contract는 external 함수를 호출할 때 최소 1/64 이상의 가스를 남겨놓는다. 따라서 외부 함수 호출이 out-of-gas 문제로 실패하더라도, 가스가 남기 때문에 catch문 이후 로직 수행이 진행된다.</p>
+
+<p>MDD에서는 mine.harvestAll()이 실패하여 catch문이 실행됐을 때 (0,0)을 return하는데, out-of-gas로 mine.harvestAll()가 실패하더라도 코드는 계속 실행된다. 따라서 updateRewards 함수에서 호출한 _harvestMine은 (0,0)을 반환하고, accRewardsPerShare 값에는 변동이 없게된다.</p>
+
+<p>현재의 MDD 컨트렉트 구조는 Deposit과 Withdraw 그리고 Claim 함수 모두 최신의 accRewardsPerShare 값이 반영되었다는 가정을 기반으로 논리가 수행되므로, accRewardsPerShare 값이 업데이트 되지 않는 문제는 여러 취약점을 생성할 수 있다. 아래 코드를 살펴보자</p>
+
+<div class="language-solidity highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="cm">/**
+ * @notice Make a new deposit into the Staker. The Staker will collect
+ *         the tokens, to be later staked in atlas mine by the owner,
+ *         according to the stake/unlock schedule.
+ * @dev    Specified amount of token must be approved by the caller.
+ *
+ * @param _amount               The amount of tokens to deposit.
+ */</span>
+<span class="k">function</span> <span class="n">deposit</span><span class="p">(</span><span class="kt">uint256</span> <span class="n">_amount</span><span class="p">)</span> <span class="k">public</span> <span class="k">virtual</span> <span class="k">override</span> <span class="n">nonReentrant</span> <span class="p">{</span>
+    <span class="nb">require</span><span class="p">(</span><span class="o">!</span><span class="n">schedulePaused</span><span class="p">,</span> <span class="s">"new staking paused"</span><span class="p">);</span>
+    <span class="nb">require</span><span class="p">(</span><span class="n">_amount</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">,</span> <span class="s">"Deposit amount 0"</span><span class="p">);</span>
+
+    <span class="n">_updateRewards</span><span class="p">();</span> <span class="c1">// 문제가 되는 부분. out-of-gas로 인해 accRewardsPerShare 값이 변하지 않는다.  
+</span>
+    <span class="c1">// Add user stake
+</span>    <span class="kt">uint256</span> <span class="n">newDepositId</span> <span class="o">=</span> <span class="o">++</span><span class="n">currentId</span><span class="p">[</span><span class="n">msg</span><span class="p">.</span><span class="n">sender</span><span class="p">];</span>
+    <span class="n">allUserDepositIds</span><span class="p">[</span><span class="n">msg</span><span class="p">.</span><span class="n">sender</span><span class="p">].</span><span class="n">add</span><span class="p">(</span><span class="n">newDepositId</span><span class="p">);</span>
+    <span class="n">UserStake</span> <span class="k">storage</span> <span class="n">s</span> <span class="o">=</span> <span class="n">userStake</span><span class="p">[</span><span class="n">msg</span><span class="p">.</span><span class="n">sender</span><span class="p">][</span><span class="n">newDepositId</span><span class="p">];</span>
+
+    <span class="n">s</span><span class="p">.</span><span class="n">amount</span> <span class="o">=</span> <span class="n">_amount</span><span class="p">;</span>
+    <span class="n">s</span><span class="p">.</span><span class="n">unlockAt</span> <span class="o">=</span> <span class="n">block</span><span class="p">.</span><span class="n">timestamp</span> <span class="o">+</span> <span class="n">locktime</span> <span class="o">+</span> <span class="mi">1</span> <span class="kc">days</span><span class="p">;</span>
+    <span class="c1">// _updateRewards()가 제대로 수행되지 않을 경우 rewardDebt는 변경되지 않은 accRewardsPerShare 값을 기반으로 계산된다.
+</span>    <span class="c1">// 이는 _withdraw()에서 해당 변수가 재사용될때 비정상적인 리워드를 발생시킨다.
+</span>    <span class="n">s</span><span class="p">.</span><span class="n">rewardDebt</span> <span class="o">=</span> <span class="p">((</span><span class="n">_amount</span> <span class="o">*</span> <span class="n">accRewardsPerShare</span><span class="p">)</span> <span class="o">/</span> <span class="n">ONE</span><span class="p">).</span><span class="n">toInt256</span><span class="p">();</span>
+
+    <span class="c1">// Update global accounting
+</span>    <span class="n">totalStaked</span> <span class="o">+=</span> <span class="n">_amount</span><span class="p">;</span>
+    <span class="n">unstakedDeposits</span> <span class="o">+=</span> <span class="n">_amount</span><span class="p">;</span>
+
+    <span class="c1">// Collect tokens
+</span>    <span class="n">magic</span><span class="p">.</span><span class="n">safeTransferFrom</span><span class="p">(</span><span class="n">msg</span><span class="p">.</span><span class="n">sender</span><span class="p">,</span> <span class="kt">address</span><span class="p">(</span><span class="nb">this</span><span class="p">),</span> <span class="n">_amount</span><span class="p">);</span>
+
+    <span class="c1">// MAGIC tokens sit in contract. Added to pending stakes
+</span>    <span class="k">emit</span> <span class="n">UserDeposit</span><span class="p">(</span><span class="n">msg</span><span class="p">.</span><span class="n">sender</span><span class="p">,</span> <span class="n">_amount</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>위 코드에서 _updateRewards()는 앞서 말한대로 out-of-gas 문제로 정상적으로 동작하지 않는다. 따라서 accRewardsPerShare 값이 변하지 않는 채로 남겨진다. 문제는 s.rewardDebt 값을 계산할 때 업데이트 되지 않은 accRewardsPerShare 값을 통해 계산되는데, 이 rewardDebt 변수가 추후 _withdraw()에서 비정상적인 리워드를 발생시킨다. 그럼 _withdraw()에서 어떤 문제가 발생하는지 살펴보자.</p>
+
+<p>reward를 계산하는 부분을 살펴보면 <code class="language-plaintext highlighter-rouge">reward = (accumulatedRewards - s.rewardDebt).toUint256();</code>와 같다. <code class="language-plaintext highlighter-rouge">(accumulatedRewards - s.rewardDebt)</code> 부분을 좀 더 풀어쓰자면, <code class="language-plaintext highlighter-rouge">s.amount*출금시점_accRewardsPerShare - s.amount*입금시점_accRewardsPerShare)</code>이다. 즉 입금시점과 출금시점의 accRewardsPerShare에 따라 reward가 변하게 된다. 입금시점의 accRewardsPerShare 값이 정상 값보다 낮다면 더 높은 보상을 받을 것이고, 반대로 출금 시점의 accRewardsPerShare 값이 정상 값보다 낮다면 더 낮은 보상을 받을 것이다. 이는 accRewardsPerShare 값이 증가하지 않는 현 상황에서 기존의 스테이킹 유저들이 출금을 진행할 시 더 낮은 <code class="language-plaintext highlighter-rouge">출금시점_accRewardsPerShare</code> 값을 갖는 걸 의미하므로 보상이 누락되게된다. 반대로, 지금 새로운 Deposit()을 수행하는 유저들은 더 낮은 <code class="language-plaintext highlighter-rouge">입금시점_accRewardsPerShare</code> 값을 갖게 되므로 추후 accRewardsPerShare 값이 제대로 복구된 후 withdraw()를 수행한다면 더 높은 보상을 챙기게 된다.</p>
+
+<div class="language-solidity highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="cm">/**
+ * @dev Logic for withdrawing a deposit. Calculates pro rata share of
+ *      accumulated MAGIC and distributes any earned rewards in addition
+ *      to original deposit.
+ *
+ * @dev An _amount argument larger than the total deposit amount will
+ *      withdraw the entire deposit.
+ *
+ * @param s                     The UserStake struct to withdraw from.
+ * @param depositId             The ID of the deposit to withdraw from (for event).
+ * @param _amount               The amount to withdraw.
+ */</span>
+<span class="k">function</span> <span class="n">_withdraw</span><span class="p">(</span>
+    <span class="n">UserStake</span> <span class="k">storage</span> <span class="n">s</span><span class="p">,</span>
+    <span class="kt">uint256</span> <span class="n">depositId</span><span class="p">,</span>
+    <span class="kt">uint256</span> <span class="n">_amount</span>
+<span class="p">)</span> <span class="k">internal</span> <span class="k">returns</span> <span class="p">(</span><span class="kt">uint256</span> <span class="n">payout</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nb">require</span><span class="p">(</span><span class="n">_amount</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">,</span> <span class="s">"Withdraw amount 0"</span><span class="p">);</span>
+
+    <span class="k">if</span> <span class="p">(</span><span class="n">_amount</span> <span class="o">&gt;</span> <span class="n">s</span><span class="p">.</span><span class="n">amount</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">_amount</span> <span class="o">=</span> <span class="n">s</span><span class="p">.</span><span class="n">amount</span><span class="p">;</span>
+    <span class="p">}</span>
+
+    <span class="c1">// Update user accounting
+</span>    <span class="kt">int256</span> <span class="n">accumulatedRewards</span> <span class="o">=</span> <span class="p">((</span><span class="n">s</span><span class="p">.</span><span class="n">amount</span> <span class="o">*</span> <span class="n">accRewardsPerShare</span><span class="p">)</span> <span class="o">/</span> <span class="n">ONE</span><span class="p">).</span><span class="n">toInt256</span><span class="p">();</span>
+    <span class="kt">uint256</span> <span class="n">reward</span><span class="p">;</span>
+
+    <span class="c1">//취약점이 발생하는 부분.
+</span>    <span class="k">if</span> <span class="p">(</span><span class="n">s</span><span class="p">.</span><span class="n">rewardDebt</span> <span class="o">&lt;</span> <span class="n">accumulatedRewards</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">reward</span> <span class="o">=</span> <span class="p">(</span><span class="n">accumulatedRewards</span> <span class="o">-</span> <span class="n">s</span><span class="p">.</span><span class="n">rewardDebt</span><span class="p">).</span><span class="n">toUint256</span><span class="p">();</span>
+    <span class="p">}</span>
+
+    <span class="n">payout</span> <span class="o">=</span> <span class="n">_amount</span> <span class="o">+</span> <span class="n">reward</span><span class="p">;</span>
+
+    <span class="n">s</span><span class="p">.</span><span class="n">amount</span> <span class="o">-=</span> <span class="n">_amount</span><span class="p">;</span>
+    <span class="n">s</span><span class="p">.</span><span class="n">rewardDebt</span> <span class="o">=</span> <span class="p">((</span><span class="n">s</span><span class="p">.</span><span class="n">amount</span> <span class="o">*</span> <span class="n">accRewardsPerShare</span><span class="p">)</span> <span class="o">/</span> <span class="n">ONE</span><span class="p">).</span><span class="n">toInt256</span><span class="p">();</span>
+
+    <span class="c1">// Update global accounting
+</span>    <span class="n">totalStaked</span> <span class="o">-=</span> <span class="n">_amount</span><span class="p">;</span>
+
+    <span class="c1">// If we need to unstake, unstake until we have enough
+</span>    <span class="kt">uint256</span> <span class="n">totalUsableMagic</span> <span class="o">=</span> <span class="n">_totalUsableMagic</span><span class="p">();</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">payout</span> <span class="o">&gt;</span> <span class="n">totalUsableMagic</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">_unstakeToTarget</span><span class="p">(</span><span class="n">payout</span> <span class="o">-</span> <span class="n">totalUsableMagic</span><span class="p">);</span>
+    <span class="p">}</span>
+
+    <span class="c1">// Decrement unstakedDeposits based on how much we are withdrawing
+</span>    <span class="c1">// If we are withdrawing more than is currently unstaked, set it to 0
+</span>    <span class="k">if</span> <span class="p">(</span><span class="n">_amount</span> <span class="o">&gt;=</span> <span class="n">unstakedDeposits</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">unstakedDeposits</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+        <span class="n">unstakedDeposits</span> <span class="o">-=</span> <span class="n">_amount</span><span class="p">;</span>
+    <span class="p">}</span>
+
+    <span class="k">emit</span> <span class="n">UserWithdraw</span><span class="p">(</span><span class="n">msg</span><span class="p">.</span><span class="n">sender</span><span class="p">,</span> <span class="n">depositId</span><span class="p">,</span> <span class="n">_amount</span><span class="p">,</span> <span class="n">reward</span><span class="p">);</span>
+<span class="p">}</span>
+
+</code></pre></div></div>
+
+<p>예시를 들어보자. 현재 글 작성 시점으로 4일전부터 mine.harvestAll() 함수 호출이 out-of-gas 문제로 실패하여 accRewardsPerShare 값이 업데이트 되지 않고 있다. 만약 지금 기존 스테이킹 유저가 Withdraw()를 호출을 한다면 4일전의 멈춘 accRewardsPerShare 값으로 계산되기 때문에, 4일간의 최신 보상이 누락된다. 반대로, 새로운 스테이킹 유저가 Deposit() 함수를 호출한다면 4일전의 멈춘 accRewardsPerShare 값으로 Deposit 스타팅 시점이 계산되기 때문에 오늘 스테이킹을 했음에도 불구하고 4일전의 스테이킹을 한 것으로 기록되 추후 accRewardsPerShare 값이 정상적으로 돌아오고 출금을 진행하면 4일의 스테이킹 리워드를 초과로 얻게되는 부정이익이 발생한다.</p>
+
+<p>결론적으로, 최근 아비트럼 체인의 Gas fee가 증가하고, MDD 컨트렉트에서 AtlasMine Contract에 매24시간마다 생성하는 Deposit 구조체가 증가함으로써 mine.harvestAll() external 함수 호출에서 out-of-gas가 발생하였다. 이 경우에 대한 대처로 _harvestMine() 함수는 단순 (0,0) 값을 반환함으로써 최신의 accRewardsPerShare 값이 업데이트 되지 않게되었고, 이 변수를 기반으로 보상을 산정하는 Deposit, Withdraw, Claim 함수에서 보상이 정상적으로 계산되지 않는 취약점이 발생하였다.</p>
+
+<h3 id="사후처리">사후처리</h3>
+<p>해당 취약점을 발견한 후 디스코드를 통해 MDD 개발자와 연락하여 위의 사실을 바로 알렸다. MDD의 개발자인 <a href="https://twitter.com/kvk0x">kvk0x</a>는 바로 해당 사실을 인지하고, 디스코드에 사후 대처에 대한 방안을 올렸다. MDD 개발자에게 보고한 시점엔 이미 accRewardsPerShare 변수가 업데이트 되지 않고 있었고, 이 시점 이후 Withdraw()를 호출한 사람들이 있었기 때문에 위의 취약점에 영향을 받을 수 밖에 없었다. MDD 팀은 트랜잭션 분석을 통해 이런 누락 MAGIC reward에 영향을 받은 사람들을 찾아내고, 수동으로 보상해주기로 결정하였다.</p>
+
+<p>또한 임시방편으로, Deposit은 일시적으로 중단시켰고, Withdraw()함수 내 _updateRewards() 함수를 삭제함으로써 Withdraw시 out-of-gas문제를 피하도록 변경하였다. 다만 _updateRewards() 함수가 호출되지 않기 때문에 새로운 reward를 수확하지 않게되고, 사용자는 out-of-gas 문제가 발생한 시점 전의 Reward에 대해서만 Claim할 수 있도록 변경되다.</p>
+
+<p>아래는 개발자에게 연락하던 과정과, 실제로 MDD 디스코드에 해당 오류와 관련된 대처 <a href="https://discord.com/channels/934927457339965460/935558047428919326/999182835980185700">공지</a>를 올린 사진이다. 두번째 사진을 보면 위 취약점을 제보한 덕분에 내 디스코드 아이디인 <code class="language-plaintext highlighter-rouge">@Minebuu</code>가 태그된 것을 확인 할 수 있다.</p>
+
+<p style="text-align: center;">
+	<img src="http://localhost:4000/assets/images/mdd_chat.png" alt="Drawing" style="max-width: 80%; height: auto;" />
+</p>
+
+<p style="text-align: center;">
+	<img src="http://localhost:4000/assets/images/mdd_anon.png" alt="Drawing" style="max-width: 80%; height: auto;" />
+</p>
+
+<p>MDD 팀은 근본적인 스테이킹 논리 구조를 변경하기 결정하였다. 기존엔 updateRewards() 함수가 유저가 Deposit, Withdraw, Claim 할 때마다 호출되었고, 지속적으로 증가하는 Deposit 구조체 때문에 updateRewards() 함수의 gas fee가 증가하여 out-of-gas문제로 revert되는 경우가 발생하였다. 따라서 여러번의 transaction으로 나눠 모든 deposit에 대해 harvest() 함수를 수행하기로 결정하였다. 이렇게 되면 out-of-gas를 걱정하지 않아도 된다. 다만, 이 시점동안엔 사용자들이 리워드를 클레임 할 수 없도록 변경된다.</p>
+
+<p>자세한 사항이 궁금한 사람들은 <a href="https://magicdragondao.medium.com/magic-dragon-dao-and-the-arbitrum-gas-battle-9914b137ccae">Magic Dragon Dao and the Arbitrum gas battle</a> 미디엄 공지를 참고하길 바란다.</p>
+
+:ET

@@ -1,0 +1,228 @@
+I"�\<h3 id="introduction">Introduction</h3>
+<p>NFT 프로젝트에서 화이트 리스트 명단만 NFT 민팅이 가능하게 만드는 시나리오처럼, 특정한 주소 리스트들만 함수를 실행할 수 있도록 스마트 컨트렉트를 작성하려면 어떻게 해야할까? 이더리움의 저장 공간과 비용에 제약이 없다면 모든 주소 리스트들을 Storage에 매핑 형태로 저장한 후, 트랜잭션 요청 시 msg.sender가 매핑 값을 갖는지 확인하는 것이 하나의 방법일 것이다. 하지만 이더리움 네트워크는 수 많은 컴퓨터가 상태를 공유하는 월드 컴퓨터로서, 이러한 월드 컴퓨터에 데이터를 저장하는 것은 많은 비용이 소모된다 (32 bytes의 word를 저장하는 것은 통상적으로 20,000 gas를 소모, 글쓴 시점 기준 약 8천원).</p>
+
+<p>이러한 공간과 비용의 문제를 해결하기 위해, 스마트 컨트렉트에서는 Merkle Proof라는 방식을 사용한다. Merkle Proof를 이용하면 모든 주소 데이터를 Storage에 저장하지 않고도, 특정 주소 데이터가 함수 실행 허용 주소 목록에 들어가는지 아닌지를 판단할 수 있다. 즉 모든 데이터 (여기선 주소 리스트)를 이더리움 온체인에 저장하지 않고도 아주 작은 온체인 데이터만으로도 (뒤에 나올 Merkle Tree의 Root 값), 특정 데이터의 무결성(Data integrity)을 검증할 수 있다.</p>
+
+<h3 id="merkle-proof-and-merkle-tree">Merkle Proof and Merkle Tree</h3>
+<p>Merkle Proof는 머클 트리(Merkle Tree)를 사용한다. 아래 그림과 같이 머클 트리의 Leaf 노드는 데이터의 해시 값으로 구성되어 있으며, Leaf 노드가 아닌 모든 노드들은 자식 노드 둘의 해시 값을 가진다. Leaf 노드의 데이터 값이 하나라도 변경된다면, 해시 함수의 결과 값이 계층마다 연쇄적으로 달라지기 때문에 Root node의 해시 값이 완전히 달라지게 된다. 우리는 이 Root Hash 값만을 이더리움 온체인에 저장함으로써 특정 데이터가 해당 머클 트리에 포함되어 있는지를 검증할 수 있다. 예시를 들어 보자.</p>
+
+<p style="text-align: center;">
+	<img src="http://localhost:4000/assets/images/MerkleProof/tree.png" alt="Drawing" style="max-width: 80%; height: auto;" />
+</p>
+
+<p>위 그림에서 Leaf 노드 H(K)가 해당 머클 트리에 포함된다는 것을 스마트 컨트렉트에서 어떻게 증명할 수 있을까? 여기서 해당 머클 트리의 Root Hash 값 H(ABCDEFGHIJKLMNOP)은 온체인에 저장되어 퍼블릭하게 공개되어 있다고 가정해보자. 우리는 위 그림에서 색칠된 노드들만 있다면 해시 계산을 통해 Root Hash 값을 도출할 수 있다. 계산은 다음과 같다.</p>
+
+<ol>
+  <li>H(K)을 H(L)와 해싱하여 H(KL)을 계산</li>
+  <li>H(KL)을 H(IJ)와 해싱하여 H(IJKL)을 계산</li>
+  <li>H(IJKL)을 H(MNOP)와 해싱하여 H(IJKLMNOP)을 계산</li>
+  <li>H(IJKLMNOP)을 H(ABCDEFGH)와 해싱하여 Root Hash인 H(ABCDEFGHIJKLMNOP)을 계산</li>
+</ol>
+
+<p>따라서 H(K)로부터 Root Hash 값을 구하기 위해선 [ H(K), H(L), H(IJ), H(MNOP), H(ABCDEFGH)] 값들이 필요하다. 위 과정을 통해 계산된 Root Hash 값이 미리 온체인에 저장되어 있던 Root Hash 값과 일치한다면 우리는 Leaf H(K)가 H(ABCDEFGHIJKLMNOP)를 Root Hash로 가지는 머클 트리에 포함되었다고 판단할 수 있다.</p>
+
+<p>Warning: 위 해시함수 계산 과정에선 해시함수 파라미터들의 순서(order)를 무시하였지만, H(H(KL), H(IJ))의 값은 H(H(IJ), H(KL))) 값과 전혀 다를 수 있기 때문에 실제 구현에선 파라미터의 순서 혹은 Concat 순서에 유의해야한다. 아래 살펴볼 OpenZeppelin 라이브러리에서는 H(IJ)와 H(KL)의 값의 크기를 비교하여 정렬한다. 즉 H(IJ)가 H(KL)보다 클 때, H(concat(H(IJ),H(KL)))을 수행하고, 반대의 경우엔 H(concat(H(KL),H(IJ)))를 수행한다.</p>
+
+<p>위의 예제처럼 특정 데이터(A to P)들의 집합이 있을 때, 우리는 이 데이터들의 해시 값을 Leaf 노드로 하여 머클 트리를 구성할 수 있다. 이 때 Merkle Proof는 특정 데이터가 해당 머클 트리에 속해있는지를 검증하는 방법이다. 스마트 컨트렉트 스토리지에 머클 트리의 Root Hash 값을 미리 저장하고, 추후 사용자가 특정 데이터가 해당 머클 트리에 속해있는지 증명하기 위해 Proof를 전달할 수 있다. 여기서 Proof는 모든 데이터를 포함 할 필요 없이, Root Hash를 재구성하기 위한 최소한의 값들만을 포함하면 된다 (앞선 예시에서 Proof는 모든 데이터 A,…,P 가 아닌 H(K), H(L), H(IJ), H(MNOP), H(ABCDEFGH)만 필요하였다).</p>
+
+<h3 id="openzeppelin의-merkle-proof-라이브러리">OpenZeppelin의 Merkle Proof 라이브러리</h3>
+
+<p>오픈제플린(OpenZeppelin)에서는 Merkle Proof를 안전하고, 쉽게 구현할 수 있도록 라이브러리를 제공하고 있다. Merkle Tree와 Proof를 생성하기 위한 <a href="https://github.com/OpenZeppelin/merkle-tree">Javascript 라이브러리</a>와, 이를 온체인상에서 검증하기 위한 <a href="https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/utils/cryptography/MerkleProof.sol">Merkle Proof 솔리디티 라이브러리</a>가 별개로 존재한다.</p>
+
+<p>오픈제플린의 라이브러리에선 이더리움 스마트 컨트렉트를 위한 “표준” 머클 트리(Standard Merkle Trees)를 사용한다. 스탠다드 머클 트리의 특징은 다음과 같다.</p>
+
+<ul>
+  <li>완전 이진 트리이다</li>
+  <li>Leaves는 크기가 큰 순부터 작은 순으로 정렬되어 있다</li>
+  <li>Leaves는 일련의 값을 ABI encoding한 결과이다</li>
+  <li>Keccak256 해시함수를 사용한다</li>
+  <li>Second preimage attacks를 방지하기 위해 Leaves는 데이터를 두번 해싱한 값을 사용한다</li>
+</ul>
+
+<p>위 사항들 중 아래 3가지 사항을 고려할 때 Leaf는 솔리디티에서 아래와 같이 표현된다.</p>
+
+<div class="language-solidity highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kt">bytes32</span> <span class="n">leaf</span> <span class="o">=</span> <span class="nb">keccak256</span><span class="p">(</span><span class="kt">bytes</span><span class="p">.</span><span class="n">concat</span><span class="p">(</span><span class="nb">keccak256</span><span class="p">(</span><span class="n">abi</span><span class="p">.</span><span class="n">encode</span><span class="p">(</span><span class="n">addr</span><span class="p">,</span> <span class="n">amount</span><span class="p">))));</span>
+</code></pre></div></div>
+
+<p>그럼 이제 자바스크립트 라이브러리를 통해 스탠다드 트리를 구성해보자. “npm install @openzeppelin/merkle-tree” 명령어를 통해 패키지를 설치할 수 있다. 우리는 자바스크립트 라이브러리를 통해 필요한 데이터로부터 Merkle Tree를 생성하고, 특정 데이터의 Proof를 출력할 수 있다. 또한 Tree를 Json 파일로 저장하여, 퍼블릭에 공개해 누구나 tree를 재구성하고, proof를 생성하도록 만들 수 있다. 아래 예제를 살펴보자.</p>
+
+<pre><code class="language-Javascript">import { StandardMerkleTree } from "@openzeppelin/merkle-tree";
+import fs from "fs";
+
+// (1) Data
+const values = [
+  ["0x1111111111111111111111111111111111111111", "3000000000000000000"],
+  ["0x2222222222222222222222222222222222222222", "0"],
+  ["0x3333333333333333333333333333333333333333", "30"],
+  ["0x4444444444444444444444444444444444444444", "1500000000000000000"],
+];
+
+// (2) 데이터로부터 StandardMerkleTree 생성
+const tree = StandardMerkleTree.of(values, ["address", "uint256"]);
+
+// (3) 생성한 standard merkle tree 출력
+console.log("Tree:\n" + tree.render());
+
+// (4) 생성한 머클 트리를 json file로 저장
+fs.writeFileSync("tree.json", JSON.stringify(tree.dump()));
+
+// (5) json 파일로 저장된 머클 트리를 불러오기
+const tree_load = StandardMerkleTree.load(JSON.parse(fs.readFileSync("tree.json")));
+
+// (6) 내가 원하는 데이터의 index를 찾기 위해 entries() 함수를 통한 Loop문 실행
+for (const [i, v] of tree_load.entries()) {
+ if (v[0] === '0x1111111111111111111111111111111111111111') {
+   // (7) entry의 index를 사용해 원하는 데이터의 proof를 생성
+   const proof = tree_load.getProof(i);
+   console.log('Value:', v);
+   console.log('Proof:', proof);
+ }
+}
+</code></pre>
+
+<p>위 코드에서, 우리는 하나의 데이터를 [“address”, “uint256”] 값으로 구성하였다. (2)번 StandardMerkleTree를 생성하는 과정에서 이러한 데이터 Type을 알려줌으로써 라이브러리가 Solidity ABI.encode에 맞춰 데이터를 인코딩 할 수 있게한다.</p>
+
+<p>(3)번에서 tree.render() 함수를 통해 콘솔에 출력한 머클 트리의 값은 아래와 같다. 3, 4, 5, 6번 노드는 Leaf 노드로서, 앞서 말한 Standard Merkle Tree의 특징으로 말했 듯 Data를 그대로 사용하지 않고 데이터에 대해 Kecca256 해시함수를 두번 실행한 값이다. 여기서 0번 노드인 “b56f9de6e47f3f111e77cca1c44d90b31d4e140910a68734860a5c3da76a4b27” 값은 Root Hash 값으로서 컨트렉트에 공개적으로 저장되어야할 값이다.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Tree:
+0) b56f9de6e47f3f111e77cca1c44d90b31d4e140910a68734860a5c3da76a4b27
+├─ 1) 5cad1d68954860301ed48598eea08649201682d2b50c9977d697cb153e0d3618
+│  ├─ 3) fdb74f493e905caded8ad7315cf41616f81342fd1fcaf89145801702c4239c2f
+│  └─ 4) 81722ecd3bc2b003be5b8850a4de98dc3e991dd001e8173e408de279c388bc2e
+└─ 2) b77c1086d6ac2a0e454607cbe31c25dd5736f1bf9c147a6de93cc7121b7d210b
+   ├─ 5) 43ab72a115a26a347338741504964163dea922ee399341883ba5705ea9a4f7d6
+   └─ 6) 4358fbda895975ea76fcee263adef8867647f91879de2c1a3c257821709287a5
+</code></pre></div></div>
+
+<p>여기서 Leaf 노드의 순서는 데이터의 입력 순서(Values 배열의 인덱스 순서)가 아니라는 점을 명심해야한다. Leaf 노드는 앞서 말했 듯, 크기에 따라 ‘정렬’된다. 첫번째 Leaf 노드 “fdb74f493e905caded8ad7315cf41616f81342fd1fcaf89145801702c4239c2f”가 가장 큰 값을 가짐을 확인할 수 있으며 이 값은 Values[0]인 [“0x1111111111111111111111111111111111111111”, “3000000000000000000”]을 두번 해싱한 값이 아닌, Values[3]을 두번 해싱한 값이다. 아래 코드를 통해 우리는 이를 확인할 수 있다.</p>
+
+<pre><code class="language-Javascript">const leaf = tree.leafHash(values[3]);
+console.log("Leaf of values[3]: " + leaf);
+</code></pre>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Leaf of values[3]: 0xfdb74f493e905caded8ad7315cf41616f81342fd1fcaf89145801702c4239c2f
+</code></pre></div></div>
+
+<p>즉, 오픈제플린에서 사용하는 표준 머클 트리에선 데이터들에 대해 Kecca256 해시 함수를 실행하여 해시 값을 먼저 구한 후, 크기가 큰 순으로 정렬하여 Leaf 노드로 삼는다.</p>
+
+<p>다시 본래 코드로 돌아와 (6)번 과정을 살펴보자.</p>
+<div class="language-javascript highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// (6) 내가 원하는 데이터의 index를 찾기 위해 entries() 함수를 통한 Loop문 실행</span>
+<span class="k">for</span> <span class="p">(</span><span class="kd">const</span> <span class="p">[</span><span class="nx">i</span><span class="p">,</span> <span class="nx">v</span><span class="p">]</span> <span class="k">of</span> <span class="nx">tree_load</span><span class="p">.</span><span class="nx">entries</span><span class="p">())</span> <span class="p">{</span>
+ <span class="k">if</span> <span class="p">(</span><span class="nx">v</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">===</span> <span class="dl">'</span><span class="s1">0x1111111111111111111111111111111111111111</span><span class="dl">'</span><span class="p">)</span> <span class="p">{</span>
+   <span class="c1">// (7) entry의 index를 사용해 원하는 데이터의 proof를 생성</span>
+   <span class="kd">const</span> <span class="nx">proof</span> <span class="o">=</span> <span class="nx">tree_load</span><span class="p">.</span><span class="nx">getProof</span><span class="p">(</span><span class="nx">i</span><span class="p">);</span>
+   <span class="nx">console</span><span class="p">.</span><span class="nx">log</span><span class="p">(</span><span class="dl">'</span><span class="s1">Value:</span><span class="dl">'</span><span class="p">,</span> <span class="nx">v</span><span class="p">);</span>
+   <span class="nx">console</span><span class="p">.</span><span class="nx">log</span><span class="p">(</span><span class="dl">'</span><span class="s1">Proof:</span><span class="dl">'</span><span class="p">,</span> <span class="nx">proof</span><span class="p">);</span>
+ <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div></div>
+<p>우리는 생성한 머클 트리에서 특정 데이터를 위한 Proof를 생성할 수 있다. 예제에선, “0x1111111111111111111111111111111111111111”의 주소를 가진 데이터를 위해 Proof를 생성한다. Proof를 출력한 결과는 다음과 같다.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Proof: [
+  '0x4358fbda895975ea76fcee263adef8867647f91879de2c1a3c257821709287a5',
+  '0x5cad1d68954860301ed48598eea08649201682d2b50c9977d697cb153e0d3618'
+]
+</code></pre></div></div>
+
+<p>우리는 이 Proof를 “0x1111111111111111111111111111111111111111”의 Leaf 해시 값과 함께 스마트 컨트렉트에 보내면 컨트렉트는 이를 통해 Root hash 값을 도출할 수 있다. 도출된 값이 컨트렉트에 스토리지에 사전에 저장된 Root Hash 값인 “b56f9de6e47f3f111e77cca1c44d90b31d4e140910a68734860a5c3da76a4b27”과 동일하다면, 스마트 컨트렉트는 이 데이터가 해당 머클 트리에 속해있는 데이터라고 판단할 수 있다.</p>
+
+<p>그럼 위 과정을 스마트 컨트렉트에서 실제로 어떻게 구현했는지 <a href="https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/utils/cryptography/MerkleProof.sol">오픈제플린의 컨트렉트 라이브러리</a>를 살펴보자.</p>
+
+<div class="language-solidity highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">library</span> <span class="n">MerkleProof</span> <span class="p">{</span>
+    <span class="cm">/**
+     * @dev Returns true if a `leaf` can be proved to be a part of a Merkle tree
+     * defined by `root`. For this, a `proof` must be provided, containing
+     * sibling hashes on the branch from the leaf to the root of the tree. Each
+     * pair of leaves and each pair of pre-images are assumed to be sorted.
+     */</span>
+    <span class="k">function</span> <span class="n">verify</span><span class="p">(</span>
+        <span class="kt">bytes32</span><span class="p">[]</span> <span class="k">memory</span> <span class="n">proof</span><span class="p">,</span>
+        <span class="kt">bytes32</span> <span class="n">root</span><span class="p">,</span>
+        <span class="kt">bytes32</span> <span class="n">leaf</span>
+    <span class="p">)</span> <span class="k">internal</span> <span class="k">pure</span> <span class="k">returns</span> <span class="p">(</span><span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="n">processProof</span><span class="p">(</span><span class="n">proof</span><span class="p">,</span> <span class="n">leaf</span><span class="p">)</span> <span class="o">==</span> <span class="n">root</span><span class="p">;</span>
+    <span class="p">}</span>
+
+    <span class="cm">/**
+     * @dev Returns the rebuilt hash obtained by traversing a Merkle tree up
+     * from `leaf` using `proof`. A `proof` is valid if and only if the rebuilt
+     * hash matches the root of the tree. When processing the proof, the pairs
+     * of leafs &amp; pre-images are assumed to be sorted.
+     *
+     * _Available since v4.4._
+     */</span>
+    <span class="k">function</span> <span class="n">processProof</span><span class="p">(</span><span class="kt">bytes32</span><span class="p">[]</span> <span class="k">memory</span> <span class="n">proof</span><span class="p">,</span> <span class="kt">bytes32</span> <span class="n">leaf</span><span class="p">)</span> <span class="k">internal</span> <span class="k">pure</span> <span class="k">returns</span> <span class="p">(</span><span class="kt">bytes32</span><span class="p">)</span> <span class="p">{</span>
+        <span class="kt">bytes32</span> <span class="n">computedHash</span> <span class="o">=</span> <span class="n">leaf</span><span class="p">;</span>
+        <span class="k">for</span> <span class="p">(</span><span class="kt">uint256</span> <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="n">proof</span><span class="p">.</span><span class="n">length</span><span class="p">;</span> <span class="n">i</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">computedHash</span> <span class="o">=</span> <span class="n">_hashPair</span><span class="p">(</span><span class="n">computedHash</span><span class="p">,</span> <span class="n">proof</span><span class="p">[</span><span class="n">i</span><span class="p">]);</span>
+        <span class="p">}</span>
+        <span class="k">return</span> <span class="n">computedHash</span><span class="p">;</span>
+    <span class="p">}</span>
+
+    <span class="k">function</span> <span class="n">_hashPair</span><span class="p">(</span><span class="kt">bytes32</span> <span class="n">a</span><span class="p">,</span> <span class="kt">bytes32</span> <span class="n">b</span><span class="p">)</span> <span class="k">private</span> <span class="k">pure</span> <span class="k">returns</span> <span class="p">(</span><span class="kt">bytes32</span><span class="p">)</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="n">a</span> <span class="o">&lt;</span> <span class="n">b</span> <span class="o">?</span> <span class="n">_efficientHash</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span> <span class="o">:</span> <span class="n">_efficientHash</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">a</span><span class="p">);</span>
+    <span class="p">}</span>
+
+    <span class="k">function</span> <span class="n">_efficientHash</span><span class="p">(</span><span class="kt">bytes32</span> <span class="n">a</span><span class="p">,</span> <span class="kt">bytes32</span> <span class="n">b</span><span class="p">)</span> <span class="k">private</span> <span class="k">pure</span> <span class="k">returns</span> <span class="p">(</span><span class="kt">bytes32</span> <span class="n">value</span><span class="p">)</span> <span class="p">{</span>
+        <span class="c1">/// @solidity memory-safe-assembly
+</span>        <span class="k">assembly</span> <span class="p">{</span>
+            <span class="n">mstore</span><span class="p">(</span><span class="mh">0x00</span><span class="p">,</span> <span class="n">a</span><span class="p">)</span>
+            <span class="n">mstore</span><span class="p">(</span><span class="mh">0x20</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span>
+            <span class="n">value</span> <span class="o">:=</span> <span class="nb">keccak256</span><span class="p">(</span><span class="mh">0x00</span><span class="p">,</span> <span class="mh">0x40</span><span class="p">)</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+</code></pre></div></div>
+
+<p>위 코드는 본래 라이브러리에서 verify와 관련된 함수만을 보여준다. verify는 우리가 앞서 자바스크립트 라이브러리에서 구했던 Proof 값, Merkle Tree의 Root Hash 값, Leaf 값을 전달받으며, Leaf와 Proof를 통해 계산된 Root Hash 값이 root 변수와 일치하는지를 판단한다.</p>
+
+<h3 id="nft-프로젝트에서의-실제-활용">NFT 프로젝트에서의 실제 활용</h3>
+
+<p>앞서 Intro에서 간단히 말했 듯, 많은 NFT 프로젝트에서 White list (WL) 민팅을 진행하고자 할 때 머클 트리를 사용한다. 모든 WL 주소를 온체인에 저장할 필요 없이, 주소 데이터로 구성된 머클 트리의 Root Hash 값만 온체인에 저장하면 되기 때문이다. 아래는 오픈제플린의 라이브러리를 활용하는 테스트 컨트렉트이다. Mint 함수를 실행하고자 하는 트랜잭션의 msg.sender가 머클 트리에 포함되어 있는지를 검증한다. 단순함을 위해 최대한 간결하게 작성되었다.</p>
+
+<pre><code class="language-Solidity">import "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
+
+/// @notice Merkle root of mint mintlist.
+bytes32 public immutable merkleRoot;
+
+/// @param _merkleRoot Merkle root of mint mintlist.
+constructor(bytes32 _merkleRoot) Owned(msg.sender) {
+    merkleRoot = _merkleRoot;   
+}
+
+
+/// limit is enforced during the creation of the merkle proof, which will be shared publicly.
+/// @param proof Merkle proof to verify the sender is mintlisted.
+/// @return gobblerId The id of the gobbler that was claimed.
+function claimGobbler(bytes32[] calldata proof) external returns (uint256 gobblerId) {
+    // If minting has not yet begun, revert.
+    if (mintStart &gt; block.timestamp) revert MintStartPending();
+
+    // If the user has already claimed, revert.
+    if (hasClaimedMintlistGobbler[msg.sender]) revert AlreadyClaimed();
+
+    // If the user's proof is invalid, revert.
+    if (!MerkleProof.verify(proof, merkleRoot, keccak256(abi.encodePacked(msg.sender)))) revert InvalidProof();
+
+    hasClaimedMintlistGobbler[msg.sender] = true;
+
+    unchecked {
+        // Overflow should be impossible due to supply cap of 10,000.
+        emit GobblerClaimed(msg.sender, gobblerId = ++currentNonLegendaryId);
+    }
+
+    _mint(msg.sender, gobblerId);
+}
+</code></pre>
+
+<h3 id="gas-optimization-assembly">Gas Optimization (Assembly)</h3>
+
+<p>위의 OpenZeppelin이 작성한 스마트 컨트렉트 코드는 어셈블리를 사용하지 않고 동작한다. 대부분의 프로젝트들은 해당 라이브러리를 사용하는 것을 추천한다. 다만 Gas 비용을 줄이기 위해서 어셈블리(Assembly)를 사용하여 같은 동작을 수행할 수 있다. Paradigm의 <a href="https://github.com/artgobblers/art-gobblers/blob/master/src/ArtGobblers.sol#L347">Art Gobblers</a>라는 NFT 프로젝트의 컨트렉트를 예시로 살펴보자.</p>
+
+<h3 id="reference">Reference</h3>
+<ol>
+  <li><a href="https://ethereum.org/en/developers/tutorials/merkle-proofs-for-offline-data-integrity/">Ethereum Foundation’s Blog Post for Merkle Proof</a></li>
+  <li><a href="https://github.com/OpenZeppelin/merkle-tree">OpenZeppelin’s Github for Merkle Tree</a></li>
+  <li><a href="https://medium.com/crypto-0-nite/merkle-proofs-explained-6dd429623dc5">Belavadi Prahalad’s Medium Post for Merkle Proof</a></li>
+</ol>
+
+:ET

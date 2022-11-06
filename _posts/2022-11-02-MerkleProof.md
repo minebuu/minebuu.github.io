@@ -299,7 +299,7 @@ Proof: [
 
 한번 더 같은 함수를 실행해보자. 0x5B38Da6a701c568545dCfcB03FcB875f56beddC4 주소로 이미 민팅을 진행했으므로 AlreadyClaimed 에러가 출력되는 것을 볼 수 있다.
 <p style="text-align: center;">
-	<img src="{{ site.url }}/assets/images/MerkleProof/AlreadyClaimed.png" alt="Drawing" style="max-width: 100%; height: 100%;"/>
+	<img src="{{ site.url }}/assets/images/MerkleProof/alreadyClaimed.png" alt="Drawing" style="max-width: 100%; height: 100%;"/>
 </p>
 
 ### 결론

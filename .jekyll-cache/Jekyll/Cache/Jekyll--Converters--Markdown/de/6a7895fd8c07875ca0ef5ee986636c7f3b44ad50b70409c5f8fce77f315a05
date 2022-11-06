@@ -1,4 +1,4 @@
-I"!~<h3 id="introduction">Introduction</h3>
+I"��<h3 id="introduction">Introduction</h3>
 <p>NFT 프로젝트에서 화이트 리스트 명단만 NFT 민팅이 가능하게 만드는 시나리오처럼, 특정한 주소 리스트들만 함수를 실행할 수 있도록 스마트 컨트렉트를 작성하려면 어떻게 해야할까? 이더리움의 저장 공간과 비용에 제약이 없다면 모든 주소 리스트들을 Storage에 매핑 형태로 저장한 후, 트랜잭션 요청 시 msg.sender가 매핑 값을 갖는지 확인하는 것이 하나의 방법일 것이다. 하지만 이더리움 네트워크는 수 많은 컴퓨터가 상태를 공유하는 월드 컴퓨터로서, 이러한 월드 컴퓨터에 데이터를 저장하는 것은 많은 비용이 소모된다 (32 bytes의 word를 저장하는 것은 통상적으로 20,000 gas를 소모, 글쓴 시점 기준 약 8천원).</p>
 
 <p>이러한 공간과 비용의 문제를 해결하기 위해, 스마트 컨트렉트에서는 Merkle Proof라는 방식을 사용한다. Merkle Proof를 이용하면 모든 주소 데이터를 Storage에 저장하지 않고도, 특정 주소 데이터가 함수 실행 허용 주소 목록에 들어가는지 아닌지를 판단할 수 있다. 즉 모든 데이터 (여기선 주소 리스트)를 이더리움 온체인에 저장하지 않고도 아주 작은 온체인 데이터만으로도 (뒤에 나올 Merkle Tree의 Root 값), 특정 데이터의 무결성(Data integrity)을 검증할 수 있다.</p>
@@ -273,23 +273,33 @@ Proof: [
 [Finished in 1.037s]
 </code></pre></div></div>
 
-<p>그럼 이제 Remix IDE를 통해 위의 솔리디티 코드를 배포해보자.</p>
+<p>그럼 이제 Remix IDE를 통해 위의 솔리디티 코드를 배포해보자. Deploy의 인자로 위에서 구한 머클 트리의 Root Hash 값인 <code class="language-plaintext highlighter-rouge">0x392dd2679d5481c8d088bcb22272b2054d3939e240c64da9834995e924192bcd</code>를 입력해주자. Deploy를 누르면 성공적으로 배포되었다는 메시지를 볼 수 있다.</p>
 
 <p style="text-align: center;">
-	<img src="http://localhost:4000/assets/images/MerkleProof/deploy.png" alt="Drawing" style="max-width: 80%; height: auto;" />
+	<img src="http://localhost:4000/assets/images/MerkleProof/deploy.png" alt="Drawing" style="max-width: 100%; height: 100%;" />
 </p>
+
+<p>그럼 이제 mint를 진행해보자. <code class="language-plaintext highlighter-rouge">allowlistMint</code> 함수의 파라미터로 proof인  <code class="language-plaintext highlighter-rouge">["0x56380595800b450765bcee141fd0b9ded9d8bfc454bd205dd31154e2d4bd104f", "0xb4422d6cb3cccffbfad08f58e6c0c8fdc1bcbbe3d198eafb4175d29290b5854f"]</code>을 파라미터로 allowlistMint 버튼을 클릭한다. from이 0x5B38Da6a701c568545dCfcB03FcB875f56beddC4이 머클 트리에 속해있으므로 성공적으로 민팅이 수행됐음을 알 수 있다. 다만 트랜잭션을 실행한 주소가 0x5B38Da6a701c568545dCfcB03FcB875f56beddC4이 아니라면 트랜잭션은 실패할 것이다. remix에서 사용할 수 있는 0x5B38Da6a701c568545dCfcB03FcB875f56beddC4 주소는 어느 PC 환경에서도 똑같이 사용할 수 있으므로 이를 테스트 해볼 수 있을 것이다.</p>
 
 <p style="text-align: center;">
-	<img src="http://localhost:4000/assets/images/MerkleProof/mint.png" alt="Drawing" style="max-width: 80%; height: auto;" />
+	<img src="http://localhost:4000/assets/images/MerkleProof/mint.png" alt="Drawing" style="max-width: 100%; height: 100%;" />
 </p>
 
+<p>한번 더 같은 함수를 실행해보자. 0x5B38Da6a701c568545dCfcB03FcB875f56beddC4 주소로 이미 민팅을 진행했으므로 AlreadyClaimed 에러가 출력되는 것을 볼 수 있다.</p>
 <p style="text-align: center;">
-	<img src="http://localhost:4000/assets/images/MerkleProof/AlreadyClaimed.png" alt="Drawing" style="max-width: 80%; height: auto;" />
+	<img src="http://localhost:4000/assets/images/MerkleProof/alreadyClaimed.png" alt="Drawing" style="max-width: 100%; height: 100%;" />
 </p>
 
-<h3 id="gas-optimization-assembly">Gas Optimization (Assembly)</h3>
+<h3 id="결론">결론</h3>
 
-<p>위의 OpenZeppelin이 작성한 스마트 컨트렉트 코드는 어셈블리를 사용하지 않고 동작한다. 대부분의 프로젝트들은 해당 라이브러리를 사용하는 것을 추천한다. 다만 Gas 비용을 줄이기 위해서 어셈블리(Assembly)를 사용하여 같은 동작을 수행할 수 있다. Paradigm의 <a href="https://github.com/artgobblers/art-gobblers/blob/master/src/ArtGobblers.sol#L347">Art Gobblers</a>라는 NFT 프로젝트의 컨트렉트를 예시로 살펴보자.</p>
+<p>이번 포스팅에서 Merkle Tree와 Merkle Proof에 대해 간략히 설명했으며, 오픈제플린의 Merkle Proof 라이브러리를 살펴보았다. 오픈 제플린의 라이브러리를 통해 높은 보안 수준의 Merkle Proof 구현을 쉽게 사용할 수 있다. 실제로도 암호화 요소를 직접 구현하는 것보다 이렇게 잘 Audit된 라이브러리를 사용하는 것을 권장한다.</p>
+
+<p>많은 NFT 프로젝트가 Merkle Proof를 통해 특정 주소들만 Mint를 수행할 수 있는 기능을 구축하고 있으며, 우리는 온체인에 모든 데이터를 저장할 필요가 없다! 다만, Merkle Tree를 통해 유저들이 Proof를 생성하기 위해선 이 Merkle Tree가 외부에 공개되어야한다. 좀 더 어려운 용어로 말하자면, 우리는 Merkle Proof를 통해 데이터 무결성(Data integrity)를 증명할 수 있지만, Merkle Tree가 공개되어 있지 않다면 Proof 자체를 생성하지 못하므로 데이터 가용성(Data availability) 문제를 해결하지는 못한다. 이를 위해 머클 트리는 IPFS 같은 분산 스토리지와 함께 사용된다.</p>
+
+<!--
+### Gas Optimization (Assembly)
+//위의 OpenZeppelin이 작성한 스마트 컨트렉트 코드는 어셈블리를 사용하지 않고 동작한다. 대부분의 프로젝트들은 해당 라이브러리를 사용하는 것을 추천한다. 다만 Gas 비용을 줄이기 위해서 어셈블리(Assembly)를 사용하여 같은 동작을 수행할 수 있다. Paradigm의 [Art Gobblers]라는 NFT 프로젝트의 컨트렉트를 예시로 살펴보자.  
+-->
 
 <h3 id="reference">Reference</h3>
 <ol>

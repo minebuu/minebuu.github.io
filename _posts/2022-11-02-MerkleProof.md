@@ -246,6 +246,11 @@ contract MerkleTest is ERC721 {
 
 }
 ```
+위 코드를 살펴보면, 생성자 (constructor) 함수에서 Merkle Tree의 Root Hash 값을 입력받고 있으며, 이는 merkleRoot 변수에 저장된다. 이는 WL 주소 데이터들을 기반으로 생성한 머클 트리의 Root Hash 값을 컨트렉트 Deploy 시점에 입력해야 한다는 것을 의미하며, 특정 주소가 proof 값과 함께 mint를 요청할 때 재계산된 Root Hash 값을 merkleRoot 변수와 비교한다. 재계산된 해시 값이 merkleRoot 변수와 일치할 경우 우리는 해당 주소가 WL 주소 목록에 포함된다는 것을 확인할 수 있다. 이러한 과정이 allowlistMint 함수에 담겨있다.
+
+allowlistMint 함수에선 msg.sender 값을 기반으로 Leaf를 계산한다. 여기선 standard merkle tree의 기준에 따라 Keccak256 해시함수를 두번 사용하였으며, ABI encoding을 사용한다. `if (!MerkleProof.verify(proof, merkleRoot, leaf))`에서는 유저가 제출한 proof와 유저의 주소로 계산된 leaf를 통해 머클 트리의 Root hash 값을 계산하며, 이를 merkleRoot 값과 비교한다. 일치하지 않는다면, if 문이 참이되므로 error가 발생한다. 만약 일치한다면, `hasClaimedMintlist[msg.sender] = true;`를 통해 해당 주소가 민팅을 수행했음을 기록하여 추후 다시 민팅을 하지 못하도록 한다. 마지막으로 ERC721로부터 상속받은 함수인 `_mint(msg.sender, id++);`를 통해 실제 NFT 민팅을 수행한다.          
+
+이제 [Remix IDE](https://remix.ethereum.org/)를 통해 위의 코드를 실제로 테스트해보자. 해당 코드를 테스트하기에 앞서 우리는 WL 주소 목록들의 Merkle Tree를 미리 생성해 Root Hash 값을 구해야한다. 이를 위해 아래 자바스크립트 코드에선 주소 4개로 구성된 머클 트리를 생성하였다. 또한, Remix IDE에서 테스트할 주소인 "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4" 주소에 대한 Proof를 생성한다.
 
 ```javascript
 import { StandardMerkleTree } from "@openzeppelin/merkle-tree";
@@ -269,7 +274,7 @@ for (const [i, v] of tree.entries()) {
     }
 }
 ```
-
+위 자바스크립트의 실행 결과는 다음과 같다. 우리는 Merkle Root의 값 "0x392dd2679d5481c8d088bcb22272b2054d3939e240c64da9834995e924192bcd"을 컨트렉트 Deploy 시점에 입력해야하며, Proof 값을 `allowlistMint` 함수 호출 시점에 입력해야한다.
 ```
 Merkle Root: 0x392dd2679d5481c8d088bcb22272b2054d3939e240c64da9834995e924192bcd
 Address: [ '0x5B38Da6a701c568545dCfcB03FcB875f56beddC4' ]
@@ -279,9 +284,35 @@ Proof: [
 ]
 [Finished in 1.037s]
 ```
-### Gas Optimization (Assembly)
 
-위의 OpenZeppelin이 작성한 스마트 컨트렉트 코드는 어셈블리를 사용하지 않고 동작한다. 대부분의 프로젝트들은 해당 라이브러리를 사용하는 것을 추천한다. 다만 Gas 비용을 줄이기 위해서 어셈블리(Assembly)를 사용하여 같은 동작을 수행할 수 있다. Paradigm의 [Art Gobblers]라는 NFT 프로젝트의 컨트렉트를 예시로 살펴보자.  
+그럼 이제 Remix IDE를 통해 위의 솔리디티 코드를 배포해보자. Deploy의 인자로 위에서 구한 머클 트리의 Root Hash 값인 `0x392dd2679d5481c8d088bcb22272b2054d3939e240c64da9834995e924192bcd`를 입력해주자. Deploy를 누르면 성공적으로 배포되었다는 메시지를 볼 수 있다.
+
+<p style="text-align: center;">
+	<img src="{{ site.url }}/assets/images/MerkleProof/deploy.png" alt="Drawing" style="max-width: 100%; height: 100%;"/>
+</p>
+
+그럼 이제 mint를 진행해보자. `allowlistMint` 함수의 파라미터로 proof인  `["0x56380595800b450765bcee141fd0b9ded9d8bfc454bd205dd31154e2d4bd104f", "0xb4422d6cb3cccffbfad08f58e6c0c8fdc1bcbbe3d198eafb4175d29290b5854f"]`을 파라미터로 allowlistMint 버튼을 클릭한다. from이 0x5B38Da6a701c568545dCfcB03FcB875f56beddC4이 머클 트리에 속해있으므로 성공적으로 민팅이 수행됐음을 알 수 있다. 다만 트랜잭션을 실행한 주소가 0x5B38Da6a701c568545dCfcB03FcB875f56beddC4이 아니라면 트랜잭션은 실패할 것이다. remix에서 사용할 수 있는 0x5B38Da6a701c568545dCfcB03FcB875f56beddC4 주소는 어느 PC 환경에서도 똑같이 사용할 수 있으므로 이를 테스트 해볼 수 있을 것이다.  
+
+<p style="text-align: center;">
+	<img src="{{ site.url }}/assets/images/MerkleProof/mint.png" alt="Drawing" style="max-width: 100%; height: 100%;"/>
+</p>
+
+한번 더 같은 함수를 실행해보자. 0x5B38Da6a701c568545dCfcB03FcB875f56beddC4 주소로 이미 민팅을 진행했으므로 AlreadyClaimed 에러가 출력되는 것을 볼 수 있다.
+<p style="text-align: center;">
+	<img src="{{ site.url }}/assets/images/MerkleProof/AlreadyClaimed.png" alt="Drawing" style="max-width: 100%; height: 100%;"/>
+</p>
+
+### 결론
+
+이번 포스팅에서 Merkle Tree와 Merkle Proof에 대해 간략히 설명했으며, 오픈제플린의 Merkle Proof 라이브러리를 살펴보았다. 오픈 제플린의 라이브러리를 통해 높은 보안 수준의 Merkle Proof 구현을 쉽게 사용할 수 있다. 실제로도 암호화 요소를 직접 구현하는 것보다 이렇게 잘 Audit된 라이브러리를 사용하는 것을 권장한다.  
+
+많은 NFT 프로젝트가 Merkle Proof를 통해 특정 주소들만 Mint를 수행할 수 있는 기능을 구축하고 있으며, 우리는 온체인에 모든 데이터를 저장할 필요가 없다! 다만, Merkle Tree를 통해 유저들이 Proof를 생성하기 위해선 이 Merkle Tree가 외부에 공개되어야한다. 좀 더 어려운 용어로 말하자면, 우리는 Merkle Proof를 통해 데이터 무결성(Data integrity)를 증명할 수 있지만, Merkle Tree가 공개되어 있지 않다면 Proof 자체를 생성하지 못하므로 데이터 가용성(Data availability) 문제를 해결하지는 못한다. 이를 위해 머클 트리는 IPFS 같은 분산 스토리지와 함께 사용된다.  
+
+
+<!--
+### Gas Optimization (Assembly)
+//위의 OpenZeppelin이 작성한 스마트 컨트렉트 코드는 어셈블리를 사용하지 않고 동작한다. 대부분의 프로젝트들은 해당 라이브러리를 사용하는 것을 추천한다. 다만 Gas 비용을 줄이기 위해서 어셈블리(Assembly)를 사용하여 같은 동작을 수행할 수 있다. Paradigm의 [Art Gobblers]라는 NFT 프로젝트의 컨트렉트를 예시로 살펴보자.  
+-->
 
 ### Reference
 1. [Ethereum Foundation's Blog Post for Merkle Proof]

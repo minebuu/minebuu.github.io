@@ -1,6 +1,6 @@
 ---
 layout: post
-title:  "스마트 컨트렉트에서의 Merkle Proof 사용"
+title:  "스마트 컨트랙트에서의 Merkle Proof 사용"
 date:   2022-11-02 19:03:31 +0900
 categories: Smart Contract
 ---

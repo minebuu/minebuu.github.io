@@ -5,7 +5,7 @@ date:   2022-11-02 19:03:31 +0900
 categories: Smart Contract
 ---
 
-이번 포스팅에선 솔리디티(Solidity)를 공부하기 위해서 어떠한 자료들을 보면 좋을지 정리해봤습니다. 대부분 제가 직접 본 자료들을 선별하였으며, 제가 추후 보기 위해 정리한 자료들도 일부 포함되어 있습니다.   
+이번 포스팅에선 솔리디티(Solidity)를 공부하기 위해서 어떠한 자료들을 보면 좋을지 정리해봤습니다. 대부분 제가 직접 본 자료들을 선별하였으며, 제가 추후 보기 위해 정리한 자료들도 일부 포함되어 있습니다. 추후 계속해서 자료 링크를 추가하도록 하겠습니다.  
 
 ### Solidity 입문자들을 위한 공부 자료
 1. [도서] 마스터링 이더리움
@@ -21,10 +21,6 @@ categories: Smart Contract
 1. 솔리디티 by example: https://solidity-by-example.org/
 2. Consensys 깃헙: https://consensys.github.io/smart-contract-best-practices/
 3. guylando의 Security recommendation: https://github.com/guylando/KnowledgeLists/blob/master/EthereumSmartContracts.md
-
-### Reference
-1. [Paradim's Blog Post for Foundry]
-2. [Foundry Book]
 
 [MERKLE PROOFS FOR OFFLINE DATA INTEGRITY]: https://ethereum.org/en/developers/tutorials/merkle-proofs-for-offline-data-integrity/
 [OpenZeppelin]: https://www.paradigm.xyz/2021/12/introducing-the-foundry-ethereum-development-toolbox

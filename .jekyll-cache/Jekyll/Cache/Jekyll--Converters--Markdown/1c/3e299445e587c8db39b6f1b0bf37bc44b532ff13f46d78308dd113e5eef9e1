@@ -1,0 +1,101 @@
+I"�<h3 id="introduction">Introduction</h3>
+<p>메타마스크를 사용하다보면 Web3 홈페이지에서 메타마스크를 통해 로그인을 수행하거나, 오픈씨와 같은 NFT 거래소에서 NFT를 사고 팔 때 아래 사진과 같은 서명 요청을 받은 경험이 많을 것이다. 여러 사이트에서 서명을 하다 보면 괜스래 어떤 보안 위협이 생기지는 않을까하는 막연한 두려움이 몰려오게 된다. 또한, 어떤 곳은 서명 요청 시 아래 두번째 사진처럼 메시지 내용 안에 특정 바이트 값만 보여주는 반면, 오픈씨와 같이 Offerer, Token 값 등 다양한 데이터를 세부적으로 보여주는 곳이 있다. 오늘은 이러한 서명 방식의 차이들을 알아보고 오픈씨에서 사용 중인 서명 방식 (EIP721)에 대해 좀 더 자세히 알아보겠다. 이 글을 통해 그 동안 막연히 가졌던 서명에 대한 불안함을 해소하고, 어떤 방식으로 서명 방식이 좀 더 안전하도록 발전되어 왔는지를 확인했으면 한다.</p>
+
+<p style="text-align: center;">
+	<img src="http://localhost:4000/assets/images/Signature/opensea_listing.png" alt="Drawing" style="max-width: 80%; height: auto;" />
+</p>
+
+<p style="text-align: center;">
+	<img src="http://localhost:4000/assets/images/Signature/authenticating.png" alt="Drawing" style="max-width: 80%; height: auto;" />
+</p>
+
+<h3 id="metamask에서의-서명">MetaMask에서의 서명</h3>
+<p>메타마스크에서는 사용자의 Key를 가지고 있고, 이를 통한 다양한 서명 방식을 지원한다. 메타마스크 로그인을 지원하는 웹사이트에서는 이 서명을 통해 <a href="https://medium.com/hackernoon/writing-for-blockchain-wallet-signature-request-messages-6ede721160d5">인증(Authentication)</a>을 수행할 수 있고, 오픈씨처럼 on-chain 프로토콜을 위해 off-chain 메시지 서명에 활용할 수 있다.</p>
+
+<h3 id="eip712">EIP712</h3>
+
+<h3 id="결론">결론</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>offerer:
+0x4fbEde53b59D1a2Ab85F785ad76E1dcD66A1546A
+offer:
+0:
+itemType:
+2
+token:
+0x942BC2d3e7a589FE5bd4A5C6eF9727DFd82F5C8a
+identifierOrCriteria:
+906
+startAmount:
+1
+endAmount:
+1
+consideration:
+0:
+itemType:
+0
+token:
+0x0000000000000000000000000000000000000000
+identifierOrCriteria:
+0
+startAmount:
+108000000000000000
+endAmount:
+108000000000000000
+recipient:
+0x4fbEde53b59D1a2Ab85F785ad76E1dcD66A1546A
+1:
+itemType:
+0
+token:
+0x0000000000000000000000000000000000000000
+identifierOrCriteria:
+0
+startAmount:
+3000000000000000
+endAmount:
+3000000000000000
+recipient:
+0x0000a26b00c1F0DF003000390027140000fAa719
+2:
+itemType:
+0
+token:
+0x0000000000000000000000000000000000000000
+identifierOrCriteria:
+0
+startAmount:
+9000000000000000
+endAmount:
+9000000000000000
+recipient:
+0x6C093Fe8bc59e1e0cAe2Ec10F0B717D3D182056B
+startTime:
+1668422891
+endTime:
+1671014891
+orderType:
+2
+zone:
+0x004C00500000aD104D7DBd00e3ae0A5C00560C00
+zoneHash:
+0x0000000000000000000000000000000000000000000000000000000000000000
+salt:
+24446860302761739304752683030156737591518664810215442929811789059466231445624
+conduitKey:
+0x0000007b02230091a7ed01230072f7006a004d60a8d4e71d599b8104250f0000
+counter:
+0
+</code></pre></div></div>
+<!--
+### Gas Optimization (Assembly)
+//위의 OpenZeppelin이 작성한 스마트 컨트렉트 코드는 어셈블리를 사용하지 않고 동작한다. 대부분의 프로젝트들은 해당 라이브러리를 사용하는 것을 추천한다. 다만 Gas 비용을 줄이기 위해서 어셈블리(Assembly)를 사용하여 같은 동작을 수행할 수 있다. Paradigm의 [Art Gobblers]라는 NFT 프로젝트의 컨트렉트를 예시로 살펴보자.  
+-->
+
+<h3 id="reference">Reference</h3>
+<ol>
+  <li><a href="https://docs.metamask.io/guide/signing-data.html#a-brief-history">MetaMask’s Guide for signing the data</a></li>
+  <li><a href="https://it-timehacker.tistory.com/316">체인의 정석: EIP712</a></li>
+</ol>
+
+:ET

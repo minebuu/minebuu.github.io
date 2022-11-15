@@ -1,6 +1,6 @@
 ---
 layout: post
-title:  "Magic Dragon DAO 업그레이드 코드 Audit"
+title:  "Magic Dragon DAO 업그레이드 컨트랙트 Audit"
 date:   2022-08-05 07:03:31 +0900
 categories: blockchain
 ---

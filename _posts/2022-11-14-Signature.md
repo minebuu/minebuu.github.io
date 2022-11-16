@@ -31,7 +31,7 @@ categories: Smart Contract
 
 위에서 `eth_sign`은 MetaMask가 가장 처음으로 제공한 서명 함수로서, 임의의 해시 값에 단순히 서명하는 방식이다. 임의의 해시 값은 특정 트랜잭션이나 다른 데이터가 될 수 있기 때문에, 피싱 공격에 사용될 수 있어 매우 위험한 서명 함수로 더 이상 사용되지 않는다. 우리는 비록 가스를 소모하지 않더라도, 메타마스크에서 `eth_sign`를 통해 서명하는 것만으로 모든 자산이 탈취될 위험이 있다. 이와 관련된 예시는 다음 [트위터 쓰레드](https://twitter.com/CT_IOE/status/1534658825843683328?s=20&t=oTD2R7LJ3w5jZAUeLt2xog)에 나와있다. 간단히 말해, 공격자는 "공격자의 주소로 10 ETH를 전송합니다"와 같은 메시지를 만들어 `eth_sign`을 요청할 수 있으며, 이러한 메시지는 사용자가 보기엔 단순한 bytes 배열이기 때문에 위험성을 모르고 서명을 할 위험이 있다. 서명을 수락한다면 이는 이더리움 네트워크에 제출할 수 있는 트랜잭션으로 완성되고, 공격자는 서명된 메시지를 이더리움 블록체인상에 제출하여 10 ETH를 탈취할 수 있다.  
 
-이러한 위험성 때문에 `eth_sign`을 통해 사용자에게 서명 요청이 발생할 시 메타마스크는 아래 Figure 3과 같이 빨간색 경고 구문을 보여준다. 반대로 이러한 경고 구문이 없다면, `eth_sign`을 통한 서명 요청이 아니므로 사용자는 이러한 피싱 공격에 안심하고 서명을 수행해도 된다. 예시로, Figure 2에서는 Figure 3과 같이 메시지에 해시 값만 보여주지만 Warning이 표시되지 않는다. 이는 `eth_sign` 서명 요청이 아니라 위의 피싱 문제를 해결한 다른 서명 함수를 사용하는 것을 의미하므로 피싱 공격에 안심하고 서명을 수행해도 된다.  
+<code><b>이러한 위험성 때문에 `eth_sign`을 통해 사용자에게 서명 요청이 발생할 시 메타마스크는 아래 Figure 3과 같이 빨간색 경고 구문을 보여준다. 반대로 이러한 경고 구문이 없다면, `eth_sign`을 통한 서명 요청이 아니므로 사용자는 이러한 피싱 공격에 안심하고 서명을 수행해도 된다.</b></code> 예시로, Figure 2에서는 Figure 3과 같이 메시지에 해시 값만 보여주지만 Warning이 표시되지 않는다. 이는 `eth_sign` 서명 요청이 아니라 위의 피싱 문제를 해결한 다른 서명 함수를 사용하는 것을 의미하므로 피싱 공격에 안심하고 서명을 수행해도 된다.  
 
 <p style="text-align: center;">
 	<img src="{{ site.url }}/assets/images/Signature/eth_sign_warning.png" alt="Drawing" style="max-width: 80%; height: auto;"/>
@@ -60,6 +60,14 @@ handleSignMessage = ({ publicAddress, nonce }) => {
 ### EIP712
 그럼 EIP712는 `eth_sign`과`personal_sign`에 비해 어떠한 점들이 개선되었는지를 알아보자. 0xProtocol 팀이 요구한 사항처럼, 사용자들은 자신이 서명하고 있는 데이터를 명시적으로 알 필요가 있으며, 피싱 공격을 방지할 수 있어야 한다.
 
+[EIP712](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-712.md) 공식 문서를 보면, 해당 제안의 타이틀은 "구조화된 데이터의 해싱과 서명 (Typed structured data hashing and signing)"이다. 즉, EIP712의 구현에서는 단순한 바이트 스트링이 아닌, 아래 Figure 4와 같이 웹사이트/컨트렉트 이름, 체인 ID, 컨트렉트 주소, Dapp에서 필요로하는 메시지 정보 등이 구조화되어 사용자에게 표시되고, 이러한 구조화된 데이터를 해싱하고 서명을 수행한다.
+
+
+정리하자면, 우리는 EIP 712를 통해 다음과 같은 이점을 얻을 수 있다.
+- `domain`을 통해 서명된 데이터가 의도된 컨트렉트와 다른 곳에서 사용될 수 없다.
+- `chainID`를 통해 서명이 다른 체인에서 사용되지 않는다. Rinkeby에서 생성된 서명은 이더리움 메인넷에서 사용될 수 없다.
+- 기타 등등 추가 예정 
+
 
 
 자세한 내용들은 해당 [블로그](https://medium.com/metamask/eip712-is-coming-what-to-expect-and-how-to-use-it-bb92fd1a7a26) 포스팅에서 확인할 수 있다.  
@@ -71,8 +79,7 @@ handleSignMessage = ({ publicAddress, nonce }) => {
 
 ### Appendix
 `personal_sign`은 메타마스크에서만 사용되는 함수로서 `eth_sign`에서 트랜잭션을 가장한 공격을 막기 위해 `"\x19Ethereum Signed Message:\n" + len(message)`가 해싱 전 메시지 앞 부분에 추가되었다고 앞에서 설명하였다. 즉 기존에 문제가 되던 `eth_sign`은 그대로 유지하고
-하지만 이는 Ethereum JSON-RPC API를 보면 혼동될 수 있다. 왜냐하면 이더리움 API에서는 `eth_sign`이 메타마스크의 `personal_sign`과 동일하게 변경되었기 때문이다. 정리하자면, `eth_sign`은 이더리움 공식 API에선 `"\x19Ethereum Signed Message:\n" + len(message)`가 항상 메시지 앞에 붙도록 변경되었고, 메타마스크의 구현에선 옛날에 사용하던 `eth_sign`는 그대로 두고, `"\x19Ethereum Signed Message:\n" + len(message)`를 메시지 앞에 붙이는 `personal_sign` 함수를 별도로 구현하였다. 메타마스크의 `eth_sign`과 공식 API의 `eth_sign`에 대한 혼동이 없길 바란다.    
-
+하지만 이는 Ethereum JSON-RPC API의 `eth_sign`을 보면 혼동될 수 있다. 왜냐하면 이더리움 API에서는 `eth_sign`이 메타마스크의 `personal_sign`과 동일하게 동작하도록 변경되었기 때문이다. 정리하자면, `eth_sign`은 이더리움 공식 API에선 `"\x19Ethereum Signed Message:\n" + len(message)`가 항상 메시지 앞에 붙도록 변경되었고, 메타마스크의 구현에선 옛날에 사용하던 `eth_sign`는 그대로 두고, `"\x19Ethereum Signed Message:\n" + len(message)`를 메시지 앞에 붙이는 `personal_sign` 함수를 별도로 구현하였다. 메타마스크의 `eth_sign`과 Ethereum JSON-RPC API의 `eth_sign`에 대한 혼동이 없길 바란다.    
 
 
 ### Reference

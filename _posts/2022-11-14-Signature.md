@@ -29,16 +29,16 @@ categories: Smart Contract
 - `signTypedData_v3`
 - `signTypedData_v4`
 
-위에서 `eth_sign`은 MetaMask가 가장 처음으로 제공한 서명 함수로서, 임의의 해시 값에 단순히 서명하는 방식이다. 임의의 해시 값은 특정 트랜잭션이나 다른 데이터가 될 수 있기 때문에, 피싱 공격에 사용될 수 있어 매우 위험한 서명 함수로 더 이상 사용되지 않는다. 우리는 비록 가스를 소모하지 않더라도, 메타마스크에서 `eth_sign`를 통해 서명하는 것만으로 모든 자산이 탈취될 위험이 있다. 이와 관련된 예시는 다음 [트위터 쓰레드](https://twitter.com/CT_IOE/status/1534658825843683328?s=20&t=oTD2R7LJ3w5jZAUeLt2xog)에 나와있다. 간단히 말해, 공격자는 "공격자의 주소로 10 ETH를 전송합니다"와 같은 메시지에 `eth_sign`을 요청할 수 있으며, 이러한 메시지는 사용자가 보기엔 단순한 bytes 배열이기 때문에 위험성을 모르고 서명을 할 위험이 있다. 서명을 수락한다면, 공격자는 서명된 메시지를 이더리움 블록체인상에 제출하여 10 ETH를 탈취할 수 있다.  
+위에서 `eth_sign`은 MetaMask가 가장 처음으로 제공한 서명 함수로서, 임의의 해시 값에 단순히 서명하는 방식이다. 임의의 해시 값은 특정 트랜잭션이나 다른 데이터가 될 수 있기 때문에, 피싱 공격에 사용될 수 있어 매우 위험한 서명 함수로 더 이상 사용되지 않는다. 우리는 비록 가스를 소모하지 않더라도, 메타마스크에서 `eth_sign`를 통해 서명하는 것만으로 모든 자산이 탈취될 위험이 있다. 이와 관련된 예시는 다음 [트위터 쓰레드](https://twitter.com/CT_IOE/status/1534658825843683328?s=20&t=oTD2R7LJ3w5jZAUeLt2xog)에 나와있다. 간단히 말해, 공격자는 "공격자의 주소로 10 ETH를 전송합니다"와 같은 메시지를 만들어 `eth_sign`을 요청할 수 있으며, 이러한 메시지는 사용자가 보기엔 단순한 bytes 배열이기 때문에 위험성을 모르고 서명을 할 위험이 있다. 서명을 수락한다면 이는 이더리움 네트워크에 제출할 수 있는 트랜잭션으로 완성되고, 공격자는 서명된 메시지를 이더리움 블록체인상에 제출하여 10 ETH를 탈취할 수 있다.  
 
-이러한 위험성 때문에 `eth_sign`을 통해 사용자에게 서명 요청이 발생할 시 메타마스크는 아래 Figure 3과 같이 빨간색 경고 구문을 보여준다. 반대로 이러한 경고 구문이 없다면, `eth_sign`을 통한 서명 요청이 아니므로 사용자는 이러한 피싱 공격에 안심하고 서명을 수행해도 된다. 예시로, Figure 2에서는 Figure 3과 같이 메시지에 해시 값만 보여주지만 Warning이 표시되지 않는다. 이는 `eth_sign` 서명 요청이 아닌 것을 의미하므로 피싱 공격에 안심하고 서명을 수행해도 된다.  
+이러한 위험성 때문에 `eth_sign`을 통해 사용자에게 서명 요청이 발생할 시 메타마스크는 아래 Figure 3과 같이 빨간색 경고 구문을 보여준다. 반대로 이러한 경고 구문이 없다면, `eth_sign`을 통한 서명 요청이 아니므로 사용자는 이러한 피싱 공격에 안심하고 서명을 수행해도 된다. 예시로, Figure 2에서는 Figure 3과 같이 메시지에 해시 값만 보여주지만 Warning이 표시되지 않는다. 이는 `eth_sign` 서명 요청이 아니라 위의 피싱 문제를 해결한 다른 서명 함수를 사용하는 것을 의미하므로 피싱 공격에 안심하고 서명을 수행해도 된다.  
 
 <p style="text-align: center;">
 	<img src="{{ site.url }}/assets/images/Signature/eth_sign_warning.png" alt="Drawing" style="max-width: 80%; height: auto;"/>
 	<figcaption align = "center"><b>Figure 3. `eth_sign` 서명 요청 시 메타마스크에서의 경고 문구</b></figcaption>
 </p>
 
-위의 `eth_sign`를 사용하는 Dapp에선 사용자가 전적으로 Dapp을 신뢰해야한다. 전문가가 아니고선 특정 바이트가 나의 자산을 탈취하는 메시지인지 올바르게 의도된 메시지인지 판단하기 어렵기 때문이다. 이런 문제를 해결하고자 `personal_sign`에서는 공격자가 메시지의 임의의 트랜잭션을 가장하여 넣을 수 없도록 개선되었다. 해당 서명 함수에선 `"\x19Ethereum Signed Message:\n" + len(message)`의 메시지가 해싱 전 메시지 앞 부분에 추가된다. 즉 `personal_sign`은 다음과 같이 계산된다: `sign(keccak256("\x19Ethereum Signed Message:\n" + len(message) + message))`. 그렇기 때문에 공격자가 "공격자의 주소로 10 ETH를 전송합니다"와 같은 메시지를 넣더라도, 앞에 `"\x19Ethereum Signed Message:\n" + len(message)`가 추가되어 해싱되기 때문에 실제 이더리움 네트워크에 트랜잭션으로서 제출할 수 없다. 또한, `personal_sign`은 `eth_sign`이 바이트 값 (해시 값)만 보여주는 것과는 다르게 사람이 읽을 수 있는 형태(UTF-8)로 원하는 메시지도 추가로 설정할 수 있다. `personal_sign`의 예시는 아래와 같다.
+위의 `eth_sign`를 사용하는 Dapp에선 사용자가 전적으로 Dapp을 신뢰해야한다. 전문가가 아니고선 특정 바이트가 나의 자산을 탈취하는 메시지인지 올바르게 의도된 메시지인지 판단하기 어렵기 때문이다. 이런 문제를 해결하고자 `personal_sign`에서는 공격자가 메시지에 임의의 트랜잭션을 가장하여 넣을 수 없도록 개선되었다. 해당 서명 함수에선 `"\x19Ethereum Signed Message:\n" + len(message)`의 메시지가 해싱 전 메시지 앞 부분에 추가된다. 즉 `personal_sign`은 다음과 같이 계산된다: `sign(keccak256("\x19Ethereum Signed Message:\n" + len(message) + message))`. 그렇기 때문에 공격자가 "공격자의 주소로 10 ETH를 전송합니다"와 같은 메시지를 넣더라도, 앞에 `"\x19Ethereum Signed Message:\n" + len(message)`가 추가되어 해싱되기 때문에 실제 이더리움 네트워크에 트랜잭션으로서 유효하지 않다. 또한, `personal_sign`은 `eth_sign`이 바이트 값 (해시 값)만 보여주는 것과는 다르게 사람이 읽을 수 있는 형태(UTF-8)로 메시지를 메타마스크에 출력할 수 있다. `personal_sign`의 예시는 아래와 같다.
 
 ```
 handleSignMessage = ({ publicAddress, nonce }) => {
@@ -68,6 +68,12 @@ handleSignMessage = ({ publicAddress, nonce }) => {
 ### 서명을 이용한 공격 사례
 
 ### 결론
+
+### Appendix
+`personal_sign`은 메타마스크에서만 사용되는 함수로서 `eth_sign`에서 트랜잭션을 가장한 공격을 막기 위해 `"\x19Ethereum Signed Message:\n" + len(message)`가 해싱 전 메시지 앞 부분에 추가되었다고 앞에서 설명하였다. 즉 기존에 문제가 되던 `eth_sign`은 그대로 유지하고
+하지만 이는 Ethereum JSON-RPC API를 보면 혼동될 수 있다. 왜냐하면 이더리움 API에서는 `eth_sign`이 메타마스크의 `personal_sign`과 동일하게 변경되었기 때문이다. 정리하자면, `eth_sign`은 이더리움 공식 API에선 `"\x19Ethereum Signed Message:\n" + len(message)`가 항상 메시지 앞에 붙도록 변경되었고, 메타마스크의 구현에선 옛날에 사용하던 `eth_sign`는 그대로 두고, `"\x19Ethereum Signed Message:\n" + len(message)`를 메시지 앞에 붙이는 `personal_sign` 함수를 별도로 구현하였다. 메타마스크의 `eth_sign`과 공식 API의 `eth_sign`에 대한 혼동이 없길 바란다.    
+
+
 
 ### Reference
 1. [MetaMask's Guide for signing the data]

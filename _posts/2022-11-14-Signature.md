@@ -62,12 +62,21 @@ handleSignMessage = ({ publicAddress, nonce }) => {
 
 [EIP712](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-712.md) 공식 문서를 보면, 해당 제안의 타이틀은 "구조화된 데이터의 해싱과 서명 (Typed structured data hashing and signing)"이다. 즉, EIP712의 구현에서는 단순한 바이트 스트링이 아닌, 아래 Figure 4와 같이 웹사이트/컨트렉트 이름, 체인 ID, 컨트렉트 주소, Dapp에서 필요로하는 메시지 정보 등이 구조화되어 사용자에게 표시되고, 이러한 구조화된 데이터를 해싱하고 서명을 수행한다.
 
+EIP712을 따르는 서명의 데이터 구조는 `Domain`이 필수적으로 포함되어야하고, 선택적으로 설계할 수 있는 `Message` 부분으로 구성되어있다. 중요한 것은 Dapp들마다 필요로 하는 데이터 구조가 다를 것이므로, wallet에서 서명에서 사용하는 데이터 구조를 스마트 컨트렉트의 서명 검증 부분에 알려줘야 한다는 점이다. 즉, 자바스크립트와 스마트 컨트렉트에서 사용하는 서명 데이터 구조가 동일해야한다. 그럼 이제 Domain과 Message 부분을 살펴보자.
 
-정리하자면, 우리는 EIP 712를 통해 다음과 같은 이점을 얻을 수 있다.
-- `domain`을 통해 서명된 데이터가 의도된 컨트렉트와 다른 곳에서 사용될 수 없다.
-- `chainID`를 통해 서명이 다른 체인에서 사용되지 않는다. Rinkeby에서 생성된 서명은 이더리움 메인넷에서 사용될 수 없다.
-- 기타 등등 추가 예정 
+`Domain`은 EIP712에서 필수적으로 포함되야하는 부분으로, 아래 필드들이 하나 이상 포함되어야한다. 프로토콜 디자이너는 서명 도메인에 맞춰 아래 필드 중 필요 없는 것들을 제거할 수 있다 (다만 필드의 순서는 지켜야 한다).
 
+- `string name`: 사용자가 알아볼 수 있는 Dapp 혹은 프로토콜 이름
+- `string version`: 현재 도메인 객체의 버전. 서로 다른 버전을 갖는 서명들은 호환되지 않음
+- `uint256 chainId`: EIP-155에서 제안된 chain id. 예를 들어 Rinkeby의 chain id를 갖는 서명은 이더리움 메인넷에서 동작하지 않음
+- `address verifyingContract`: 서명이 사용될 컨트렉트의 주소. 서명이 사용될 컨트렉트를 명확히 명시함으로써 피싱 공격을 방지할 수 있음.
+- `bytes32 salt`: 컨트랙트와 dApp 모두에 하드코딩된 고유한 32바이트 값으로, dApp을 다른 dApp과 구별하기 위한 최후의 수단
+
+`Message`는 Domain과 다르게 모든 부분이 개발자의 선택에 따라 구현될 수 있다. 예시를 살펴보자.
+
+```javascript
+
+```      
 
 
 자세한 내용들은 해당 [블로그](https://medium.com/metamask/eip712-is-coming-what-to-expect-and-how-to-use-it-bb92fd1a7a26) 포스팅에서 확인할 수 있다.  

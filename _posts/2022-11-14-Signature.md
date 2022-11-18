@@ -6,7 +6,7 @@ categories: Smart Contract
 ---
 
 ### Introduction
-메타마스크를 사용하다보면 Web3 홈페이지에서 메타마스크를 통해 로그인을 수행하거나, 오픈씨와 같은 NFT 거래소에서 NFT를 사고 팔 때 아래 사진과 같은 서명 요청을 받은 경험이 많을 것이다. 여러 사이트에서 서명을 하다 보면 괜스래 어떤 보안 위협이 생기지는 않을까하는 막연한 두려움이 몰려오게 된다. 또한, 어떤 곳은 서명 요청 시 아래 Figure 2 사진처럼 메시지 내용 안에 특정 해시 값만 보여주는 반면, Figure 1 사진처럼 오픈씨와 같이 Offerer, Token 값 등 다양한 데이터를 세부적으로 보여주는 곳이 있다. 오늘은 이러한 서명 방식의 차이들을 알아보고 오픈씨에서 사용 중인 서명 방식 (EIP721)에 대해 좀 더 자세히 알아보겠다. 이 글을 통해 그 동안 막연히 가졌던 서명에 대한 불안함을 해소하고, 어떤 방식으로 서명 방식이 좀 더 안전하도록 발전되어 왔는지를 확인했으면 한다.
+메타마스크를 사용하다보면 Web3 홈페이지에서 메타마스크를 통해 로그인을 수행하거나, 오픈씨와 같은 NFT 거래소에서 NFT를 사고 팔 때 아래 사진과 같은 서명 요청을 받은 경험이 많을 것이다. 여러 사이트에서 서명을 하다 보면 괜스래 어떤 보안 위협이 생기지는 않을까하는 막연한 두려움이 몰려오게 된다. 또한, 어떤 곳은 서명 요청 시 아래 Figure 2 사진처럼 메시지 내용 안에 특정 해시 값만 보여주는 반면, Figure 1 사진처럼 오픈씨와 같이 Offerer, Token 값 등 다양한 데이터를 세부적으로 보여주는 곳이 있다. 오늘은 이러한 서명 방식의 차이들을 알아보고 오픈씨에서 사용 중인 서명 방식 [EIP712]에 대해 좀 더 자세히 알아보겠다. 이 글을 통해 그 동안 막연히 가졌던 서명에 대한 불안함을 해소하고, 어떤 방식으로 서명 방식이 좀 더 안전하도록 발전되어 왔는지를 확인했으면 한다.
 
 <p style="text-align: center;">
 	<img src="{{ site.url }}/assets/images/Signature/opensea_listing.png" alt="Drawing" style="max-width: 80%; height: auto;"/>
@@ -60,7 +60,7 @@ handleSignMessage = ({ publicAddress, nonce }) => {
 ### EIP712
 그럼 EIP712는 `eth_sign`과`personal_sign`에 비해 어떠한 점들이 개선되었는지를 알아보자. 0xProtocol 팀이 요구한 사항처럼, 사용자들은 자신이 서명하고 있는 데이터를 명시적으로 알 필요가 있으며, 피싱 공격을 방지할 수 있어야 한다.
 
-[EIP712](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-712.md) 공식 문서를 보면, 해당 제안의 타이틀은 "구조화된 데이터의 해싱과 서명 (Typed structured data hashing and signing)"이다. 즉, EIP712의 구현에서는 단순한 바이트 스트링이 아닌, 아래 Figure 4와 같이 웹사이트/컨트렉트 이름, 체인 ID, 컨트렉트 주소, Dapp에서 필요로하는 메시지 정보 등이 구조화되어 사용자에게 표시되고, 이러한 구조화된 데이터를 해싱하고 서명을 수행한다.
+[EIP712] 공식 문서를 보면, 해당 제안의 타이틀은 "구조화된 데이터의 해싱과 서명 (Typed structured data hashing and signing)"이다. 즉, EIP712의 구현에서는 단순한 바이트 스트링이 아닌, 아래 Figure 4와 같이 웹사이트/컨트렉트 이름, 체인 ID, 컨트렉트 주소, Dapp에서 필요로하는 메시지 정보 등이 구조화되어 사용자에게 표시되고, 이러한 구조화된 데이터를 해싱하고 서명을 수행한다.
 
 EIP712을 따르는 서명의 데이터 구조는 `Domain`이 필수적으로 포함되어야하고, 선택적으로 설계할 수 있는 `Message` 부분으로 구성되어있다. 중요한 것은 Dapp들마다 필요로 하는 데이터 구조가 다를 것이므로, wallet에서 서명에서 사용하는 데이터 구조를 스마트 컨트렉트의 서명 검증 부분에 알려줘야 한다는 점이다. 즉, 자바스크립트와 스마트 컨트렉트에서 사용하는 서명 데이터 구조가 동일해야한다. 그럼 이제 Domain과 Message 부분을 살펴보자.
 
@@ -72,11 +72,51 @@ EIP712을 따르는 서명의 데이터 구조는 `Domain`이 필수적으로 �
 - `address verifyingContract`: 서명이 사용될 컨트렉트의 주소. 서명이 사용될 컨트렉트를 명확히 명시함으로써 피싱 공격을 방지할 수 있음.
 - `bytes32 salt`: 컨트랙트와 dApp 모두에 하드코딩된 고유한 32바이트 값으로, dApp을 다른 dApp과 구별하기 위한 최후의 수단
 
-`Message`는 Domain과 다르게 모든 부분이 개발자의 선택에 따라 구현될 수 있다. 예시를 살펴보자.
+`Message`는 Domain과 다르게 모든 부분이 Dapp 선택적으로 프로토콜에 적절하게 구현될 수 있다. 아래와 같은 우리는 특정 주소가 특정 주소에게 메일을 보내는 프로토콜에서의 데이터 구조를 생각해보자. 여기서 우리는 Solidity와의 호환성을 위해 Solidity의 표기법을 따른다.
 
-```javascript
+```
+struct Mail {
+    address from;
+    address to;
+    string contents;
+}
+```
 
-```      
+
+이제 `Domain`과 `Message`에 대해 알아보았으니, 위 정보들을 가지고 서명을 어떻게 구성하는지 알아보겠다. 중요한점은 이러한 구조화된 데이터를 서명하기 위해 우리는 EIP712에서 정한 "규약"을 따른다는 점이다. 그렇기 때문에 여기서 어떤 정의를 사용하는지를 살펴보고 익숙해지는 것이 중요하다.
+
+우선 다시 한번 [EIP712]를 보자면, `eth_signTypedData` 함수는 다음과 같이 계산된다:
+
+`sign(keccak256("\x19\x01" ‖ domainSeparator ‖ hashStruct(message)))`
+> 글쓰는 시점 EIP712의 #L168에서는 eth_signTypedData 함수가 `sign(keccak256("\x19Ethereum Signed Message:\n" + len(message) + message)))`로 계산된다고 잘못 표시되어있다 (기존 eth_sign 내용의 잘못된 copy). 이러한 오류가 [깃헙 이슈](https://github.com/ethereum/EIPs/pull/5457)에서 다뤄지고 있고, 곧 위에서 쓴 정의인 `sign(keccak256("\x19\x01" ‖ domainSeparator ‖ hashStruct(message)))` 로 수정될 것으로 보인다.
+
+`domainSeparator`와 `hashStruct(message)`의 정의를 이어서 살펴보자. 이러한 정의들은 머리가 아플수도 있지만, 뒤에서 예제를 통해 차근차근 살펴볼 것이니 아래 정의는 가볍게 봐도 좋다.
+
+<code>hashStruct(s : 𝕊) = keccak256(typeHash ‖ encodeData(s)) where typeHash = keccak256(encodeType(typeOf(s))) </code>
+
+여기서 `encodeData`는 `enc(value₁) ‖ enc(value₂) ‖ … ‖ enc(valueₙ)`를 의미하는데, 각 value는 정확히 32 바이트 길이여야한다. 즉 `bytes` 혹은 `string`과 같은 dynamic 값들은 keccak256 함수를 적용해 인코딩함으로써 32 바이트 길이로 통일시켜줘야한다. 배열의 경우에는 배열 값들을 concatenate하여 데이터 값에 keccak256 함수를 적용한다. (예시로 uint256 arr[3]의 경우, `keccak256( arr[0] || arr[1] || arr[2])`로 계산). 마지막으로 구조체는 (struct)는  
+
+위 수식이 잘 이해가 안될 수 있으니, 위의 Mail 구조체를 예시로 hashStruct(Mail mail)을 솔리디티 코드로 구현해보며 차근차근 이해해보자.
+
+```
+
+```
+
+이러한 정의가 처음에는 복잡하게 느껴질 수 있겠지만 뒤에 여러 예제를 보다보면 차차 익숙해질 것이다.  
+
+
+
+```
+struct Identity {
+    uint256 userId;
+    address wallet;
+}
+
+struct Bid {
+    uint256 amount;
+    Identity bidder;
+}
+```  
 
 
 자세한 내용들은 해당 [블로그](https://medium.com/metamask/eip712-is-coming-what-to-expect-and-how-to-use-it-bb92fd1a7a26) 포스팅에서 확인할 수 있다.  
@@ -86,16 +126,24 @@ EIP712을 따르는 서명의 데이터 구조는 `Domain`이 필수적으로 �
 
 ### 결론
 
+---
 ### Appendix
+
+* Personal_sign
+
 `personal_sign`은 메타마스크에서만 사용되는 함수로서 `eth_sign`에서 트랜잭션을 가장한 공격을 막기 위해 `"\x19Ethereum Signed Message:\n" + len(message)`가 해싱 전 메시지 앞 부분에 추가되었다고 앞에서 설명하였다. 즉 기존에 문제가 되던 `eth_sign`은 그대로 유지하고
 하지만 이는 Ethereum JSON-RPC API의 `eth_sign`을 보면 혼동될 수 있다. 왜냐하면 이더리움 API에서는 `eth_sign`이 메타마스크의 `personal_sign`과 동일하게 동작하도록 변경되었기 때문이다. 정리하자면, `eth_sign`은 이더리움 공식 API에선 `"\x19Ethereum Signed Message:\n" + len(message)`가 항상 메시지 앞에 붙도록 변경되었고, 메타마스크의 구현에선 옛날에 사용하던 `eth_sign`는 그대로 두고, `"\x19Ethereum Signed Message:\n" + len(message)`를 메시지 앞에 붙이는 `personal_sign` 함수를 별도로 구현하였다. 메타마스크의 `eth_sign`과 Ethereum JSON-RPC API의 `eth_sign`에 대한 혼동이 없길 바란다.    
 
+* 재사용 공격(Replay Attack)
+
+많은 어플리케이션에서 서명은 토큰을 스왑하거나, NFT를 거래하는 등에 사용된다. 서명을 재사용하는 경우에 대한 대비책은 각 어플리케이션이 적절히 테스트하고 방비책을 만들어야한다. 이는 서명 메시지에 nonce 값을 포함하는 등의 방식으로 replay attack을 방지할 수 있다.  
 
 ### Reference
 1. [MetaMask's Guide for signing the data]
 2. [체인의 정석: EIP712]
 3. [Koh Wei Jie's Blog post for EIP712]
 
+[EIP712]: https://github.com/ethereum/EIPs/blob/master/EIPS/eip-712.md
 [MetaMask's Guide for signing the data]: https://docs.metamask.io/guide/signing-data.html#a-brief-history
 [체인의 정석:EIP712]: https://it-timehacker.tistory.com/316
 [hackernoon]:https://medium.com/hackernoon/writing-for-blockchain-wallet-signature-request-messages-6ede721160d5

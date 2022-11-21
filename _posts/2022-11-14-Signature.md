@@ -62,9 +62,14 @@ handleSignMessage = ({ publicAddress, nonce }) => {
 
 [EIP712] 공식 문서를 보면, 해당 제안의 타이틀은 "구조화된 데이터의 해싱과 서명 (Typed structured data hashing and signing)"이다. 즉, EIP712의 구현에서는 단순한 바이트 스트링이 아닌, 아래 Figure 4와 같이 웹사이트/컨트렉트 이름, 체인 ID, 컨트렉트 주소, Dapp에서 필요로하는 메시지 정보 등이 구조화되어 사용자에게 표시되고, 이러한 구조화된 데이터를 해싱하고 서명을 수행한다.
 
-EIP712을 따르는 서명의 데이터 구조는 `Domain`이 필수적으로 포함되어야하고, 선택적으로 설계할 수 있는 `Message` 부분으로 구성되어있다. 중요한 것은 Dapp들마다 필요로 하는 데이터 구조가 다를 것이므로, wallet에서 서명에서 사용하는 데이터 구조를 스마트 컨트렉트의 서명 검증 부분에 알려줘야 한다는 점이다. 즉, 자바스크립트와 스마트 컨트렉트에서 사용하는 서명 데이터 구조가 동일해야한다. 그럼 이제 Domain과 Message 부분을 살펴보자.
+<p style="text-align: center;">
+	<img src="{{ site.url }}/assets/images/Signature/eip712.png" alt="Drawing" style="max-width: 80%; height: auto;"/>
+	<figcaption align = "center"><b>Figure 4. `EIP712`를 사용한 메시지 서명 요청</b></figcaption>
+</p>
 
-`Domain`은 EIP712에서 필수적으로 포함되야하는 부분으로, 아래 필드들이 하나 이상 포함되어야한다. 프로토콜 디자이너는 서명 도메인에 맞춰 아래 필드 중 필요 없는 것들을 제거할 수 있다 (다만 필드의 순서는 지켜야 한다).
+EIP712을 따르는 서명의 데이터 구조는 `Domain`이 필수적으로 포함되어야하고, 선택적으로 설계할 수 있는 `Message` 부분으로 구성되어있다. Dapp들마다 필요로 하는 데이터 구조가 다를 수 있으므로, 각 Dapp은 자신들의 요구사항에 맞춰 Domain과 Message 부분을 설계할 수 있다.
+
+`Domain`은 EIP712에서 필수적으로 포함되야하는 부분으로, 아래 필드들이 하나 이상 포함되어야한다. 프로토콜 디자이너는 서명 도메인에 맞춰 아래 필드 중 필요 없는 것들을 제거할 수 있다 (다만 필드의 순서는 지켜야 한다). 보통은 [Uniswap v2](https://github.com/Uniswap/v2-core/blob/master/contracts/UniswapV2ERC20.sol#L31)에서와 같이 `salt` 필드를 제외한 나머지 필드들은 모두 포함하여 Domain을 구성한다.  
 
 - `string name`: 사용자가 알아볼 수 있는 Dapp 혹은 프로토콜 이름
 - `string version`: 현재 도메인 객체의 버전. 서로 다른 버전을 갖는 서명들은 호환되지 않음
@@ -72,6 +77,7 @@ EIP712을 따르는 서명의 데이터 구조는 `Domain`이 필수적으로 �
 - `address verifyingContract`: 서명이 사용될 컨트렉트의 주소. 서명이 사용될 컨트렉트를 명확히 명시함으로써 피싱 공격을 방지할 수 있음.
 - `bytes32 salt`: 컨트랙트와 dApp 모두에 하드코딩된 고유한 32바이트 값으로, dApp을 다른 dApp과 구별하기 위한 최후의 수단
 
+<br/>
 `Message`는 Domain과 다르게 모든 부분이 Dapp 선택적으로 프로토콜에 적절하게 구현될 수 있다. 아래와 같은 우리는 특정 주소가 특정 주소에게 메일을 보내는 프로토콜에서의 데이터 구조를 생각해보자. 여기서 우리는 Solidity와의 호환성을 위해 Solidity의 표기법을 따른다.
 
 ```
@@ -82,25 +88,31 @@ struct Mail {
 }
 ```
 
+이제 `Domain`과 `Message`에 대해 알아보았으니, 위 정보들을 가지고 서명을 어떻게 구현하는지를 알아보겠다. 우선 다시 한번 [EIP712]를 보자면, `eth_signTypedData` 함수는 다음과 같이 계산된다: `sign(keccak256("\x19\x01" ‖ domainSeparator ‖ hashStruct(message)))`.
+이는 EIP-191과 호환되는 인코딩을 따라는데, 여기서 `\x19`는 실제 이더리움 트랜잭션과 서명을 구별하는 역할을 함으로써, `eth_sign`에서 발생 가능했던 피싱 공격을 방지한다. `0x01`은 `version byte` 값으로 EIP712를 위한 고정된 값이다. domainSeparator와 hashStruct에 대한 설명은 아래에 자세히 나와 있으며 두 값 모두 32 바이트의 길이를 가진다.
 
-이제 `Domain`과 `Message`에 대해 알아보았으니, 위 정보들을 가지고 서명을 어떻게 구성하는지 알아보겠다. 중요한점은 이러한 구조화된 데이터를 서명하기 위해 우리는 EIP712에서 정한 "규약"을 따른다는 점이다. 그렇기 때문에 여기서 어떤 정의를 사용하는지를 살펴보고 익숙해지는 것이 중요하다.
+> 글쓰는 시점 EIP712의 #L168에서는 eth_signTypedData 함수가 `sign(keccak256("\x19Ethereum Signed Message:\n" + len(message) + message)))`로 정의되어 있다고 나오지만, 이는 잘못 표기된 것이다 (기존 eth_sign 내용의 잘못된 copy). 이러한 오류가 [깃헙 이슈](https://github.com/ethereum/EIPs/pull/5457)에서 다뤄지고 있고, 곧 위에서 쓴 정의인 `sign(keccak256("\x19\x01" ‖ domainSeparator ‖ hashStruct(message)))` 로 수정될 것으로 보인다.
 
-우선 다시 한번 [EIP712]를 보자면, `eth_signTypedData` 함수는 다음과 같이 계산된다:
+#### HashStruct
+`domainSeparator`와 `hashStruct`의 정의를 이어서 살펴보자. 우선 hashStruct의 정의는 다음과 같다.  
 
-`sign(keccak256("\x19\x01" ‖ domainSeparator ‖ hashStruct(message)))`
-> 글쓰는 시점 EIP712의 #L168에서는 eth_signTypedData 함수가 `sign(keccak256("\x19Ethereum Signed Message:\n" + len(message) + message)))`로 계산된다고 잘못 표시되어있다 (기존 eth_sign 내용의 잘못된 copy). 이러한 오류가 [깃헙 이슈](https://github.com/ethereum/EIPs/pull/5457)에서 다뤄지고 있고, 곧 위에서 쓴 정의인 `sign(keccak256("\x19\x01" ‖ domainSeparator ‖ hashStruct(message)))` 로 수정될 것으로 보인다.
+<code>hashStruct(s : structured data 𝕊) = keccak256(typeHash ‖ encodeData(s)) where typeHash = keccak256(encodeType(typeOf(s))) </code>
 
-`domainSeparator`와 `hashStruct(message)`의 정의를 이어서 살펴보자. 이러한 정의들은 머리가 아플수도 있지만, 뒤에서 예제를 통해 차근차근 살펴볼 것이니 아래 정의는 가볍게 봐도 좋다.
+여기서 `encodeData`는 `enc(value₁) ‖ enc(value₂) ‖ … ‖ enc(valueₙ)`를 의미하는데, 각 value는 정확히 32 바이트 길이여야한다. 즉 `bytes` 혹은 `string`과 같은 dynamic 값들은 값마다 길이가 다르므로 keccak256 함수를 적용해 32 바이트 길이로 통일시켜줘야한다. 배열의 경우에는 `keccak256( arr[0] || arr[1] || arr[2])`와 같이 배열 값들을 concate하여 계산한다. 마지막으로 구조체(struct)는 재귀적으로 인코딩된다.   
 
-<code>hashStruct(s : 𝕊) = keccak256(typeHash ‖ encodeData(s)) where typeHash = keccak256(encodeType(typeOf(s))) </code>
-
-여기서 `encodeData`는 `enc(value₁) ‖ enc(value₂) ‖ … ‖ enc(valueₙ)`를 의미하는데, 각 value는 정확히 32 바이트 길이여야한다. 즉 `bytes` 혹은 `string`과 같은 dynamic 값들은 keccak256 함수를 적용해 인코딩함으로써 32 바이트 길이로 통일시켜줘야한다. 배열의 경우에는 배열 값들을 concatenate하여 데이터 값에 keccak256 함수를 적용한다. (예시로 uint256 arr[3]의 경우, `keccak256( arr[0] || arr[1] || arr[2])`로 계산). 마지막으로 구조체는 (struct)는  
-
-위 수식이 잘 이해가 안될 수 있으니, 위의 Mail 구조체를 예시로 hashStruct(Mail mail)을 솔리디티 코드로 구현해보며 차근차근 이해해보자.
+위 수식이 잘 이해가 안될 수 있으니, 위에서 언급한 Mail 구조체를 예시로 `hashStruct(Mail mail)`을 솔리디티 코드로 구현해보며 차근차근 이해해보자.
 
 ```
-
+struct Mail {
+    address from;
+    address to;
+    string contents;
+}
 ```
+
+#### domainSeparator
+
+
 
 이러한 정의가 처음에는 복잡하게 느껴질 수 있겠지만 뒤에 여러 예제를 보다보면 차차 익숙해질 것이다.  
 
@@ -124,6 +136,8 @@ struct Bid {
 
 ### 서명을 이용한 공격 사례
 
+### Proxy Contract에서의 EIP712 구현
+[Openzeppelin의 EIP712Upgradeable](https://github.com/OpenZeppelin/openzeppelin-contracts-upgradeable/blob/master/contracts/utils/cryptography/EIP712Upgradeable.sol)
 ### 결론
 
 ---

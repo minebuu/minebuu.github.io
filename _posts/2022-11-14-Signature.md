@@ -98,46 +98,173 @@ struct Mail {
 
 <code>hashStruct(s : structured data 𝕊) = keccak256(typeHash ‖ encodeData(s)) where typeHash = keccak256(encodeType(typeOf(s))) </code>
 
-여기서 `encodeData`는 `enc(value₁) ‖ enc(value₂) ‖ … ‖ enc(valueₙ)`를 의미하는데, 각 value는 정확히 32 바이트 길이여야한다. 즉 `bytes` 혹은 `string`과 같은 dynamic 값들은 값마다 길이가 다르므로 keccak256 함수를 적용해 32 바이트 길이로 통일시켜줘야한다. 배열의 경우에는 `keccak256( arr[0] || arr[1] || arr[2])`와 같이 배열 값들을 concate하여 계산한다. 마지막으로 구조체(struct)는 재귀적으로 인코딩된다.   
+여기서 `encodeData`는 `enc(value₁) ‖ enc(value₂) ‖ … ‖ enc(valueₙ)`를 의미하는데, 각 value는 정확히 32 바이트 길이여야한다. 즉 bytes 혹은 string과 같은 dynamic 값들은 값마다 길이가 다르므로 keccak256 함수를 적용해 32 바이트 길이로 통일시켜줘야한다. 배열의 경우에는 `keccak256( arr[0] || arr[1] || arr[2])`와 같이 배열 값들을 concate하여 계산한다. 마지막으로 구조체(struct)는 재귀적으로 인코딩된다.
 
-위 수식이 잘 이해가 안될 수 있으니, 위에서 언급한 Mail 구조체를 예시로 `hashStruct(Mail mail)`을 솔리디티 코드로 구현해보며 차근차근 이해해보자.
+`encodeType`은 구조체 데이터 𝕊를 다음과 같이 인코딩한다: `name ‖ "(" ‖ member₁ ‖ "," ‖ member₂ ‖ "," ‖ … ‖ memberₙ ")"`. 여기서 member `type ‖ " " ‖ name.`이다. 위의 Mail 구조체 데이터 𝕊를 예시로 encodeType을 적용할 경우 `Mail(address from,address to,string contents)`와 같다. `address from`처럼 변수의 타입과 변수명에는 스페이스 공백이 들어가야되며, 변수명 다음에는 바로 `,`가 붙는다. 또한 이러한 멤버들을 구조체 이름인 Member가 `()`으로 감싼 형태이다. 이렇게 인코딩 된 데이터에 keccak256 해시함수에 적용한 결과가 `typeHash` 값이 된다. 데이터를 인코딩할 때 스페이스 하나만 달라져도 해시함수의 결과값이 달리지기 때문에, 위에서 정의한 `encodeType`을 지키는게 매우 중요하다.
+
+>구조체 데이터가 또 다른 구조체 데이터를 포함하는 경우에는 다음과 같이 인코딩한다. 가장 먼저 참조를 하는 데이터 구조를 위치시킨다. 그리고 참조하는 구조체들을 알파벳순으로 정렬하여 뒤에 추가한다. 예시로, `Transaction(Person from,Person to,Asset tx)`과 같은 구조체가 있을 때 Asset 구조체가 Person 구조체보다 알파벳 순서가 빠르므로 다음과 같이 인코딩 될 수 있다: `Transaction(Person from,Person to,Asset tx)Asset(address token,uint256 amount)Person(address wallet,string name)`
+
+
+
+위의 수식들이 잘 이해가 안될수도 있으니, 위에서 언급한 Mail 구조체를 예시로 `hashStruct(Mail mail)`을 솔리디티 코드로 구현해보며 차근차근 이해해보자.
 
 ```
-struct Mail {
-    address from;
-    address to;
-    string contents;
+pragma solidity ^0.8.0;
+
+contract Example {
+
+	//structured Data 𝕊
+	struct Mail {
+	    address from;
+	    address to;
+	    string contents;
+	}
+
+	//1. Calculate TypeHash = keccak256(encodeType(typeOf(s)))
+	bytes32 public constant MAIL_TYPEHASH = keccak256(
+			"Mail(address from,address to,string contents)"
+	);
+
+	//2. hashStruct(s) = keccak256(typeHash ‖ encodeData(s))
+	//3. encodeData = enc(value₁) ‖ enc(value₂) ‖ … ‖ enc(valueₙ)
+	function hashStruct(Mail mail) internal pure returns (bytes32) {
+			return keccak256(abi.encode(
+					MAIL_TYPEHASH,
+					mail.from,
+					mail.to,
+					//bytes, string 값에는 keccak256 함수를 적용해 32 바이트 길이로 통일
+					keccak256(bytes(mail.contents))
+			));
+	}
 }
 ```
+위 코드를 보면, Mail 구조체의 hashStruct를 어떻게 구하는지 쉽게 이해할 수 있을 것이다. 우선 TypeHash는 앞서 설명한대로 1. 정해진 규칙에 맞춰 인코딩 된 값에 keccak256 해시함수를 적용하여 계산한다. 2. hashStruct는 typeHash와 encodeData(Mail)을 concate하여 keccak256 해시 함수를 적용함으로써 계산한다. 여기서 3. encodeData는 위에서 언급했듯이 구조체의 모든 값들에 대해 `enc(value₁) ‖ enc(value₂) ‖ … ‖ enc(valueₙ)`를 수행한다. 다만 string과 같은 dynamic 값들은 keccak256를 적용함으로써 32바이트 길이로 통일 시켜줘야한다.     
+
+> hashStruct 함수에서 왜 해시함수 전에 abi.encode를 쓸까? 이에 대한 [Openzeppelin 포럼](https://forum.openzeppelin.com/t/abi-encode-vs-abi-encodepacked/2948) QnA
 
 #### domainSeparator
+위에서 hashStruct(Mail mail) 값을 구해봤지만, 우리는 Domain Sapartor라는 값도 구해야한다. Domain Saparator역시 위 과정과 매우 유사하게 구할 수 있다. 정의는 다음과 같다: `domainSeparator = hashStruct(eip712Domain)`
 
+즉 hashStruct 함수의 인자에 임의의 메시지가 아닌 EIP712에서 정의하는 Domain을 넣는 점이 다르다. 예시로 salt를 제외한 모든 필드(name, version, chainId, verifyingContract)를 사용하는 상황을 가정해보겠다.
 
+```solidity
+bytes32 public DOMAIN_SEPARATOR;
+bytes32 public constant EIP712DOMAIN_TYPEHASH = keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
 
-이러한 정의가 처음에는 복잡하게 느껴질 수 있겠지만 뒤에 여러 예제를 보다보면 차차 익숙해질 것이다.  
-
-
-
-```
-struct Identity {
-    uint256 userId;
-    address wallet;
-}
-
-struct Bid {
-    uint256 amount;
-    Identity bidder;
+constructor (string memory name, string memory version) {
+		//hashStruct(s) = keccak256(typeHash ‖ encodeData(s))
+		DOMAIN_SEPARATOR = keccak256(
+				abi.encode(
+						//typeHash(eip712Domain)
+						EIP712DOMAIN_TYPEHASH,
+						//name
+						keccak256(bytes(name)),
+						//version
+						keccak256(bytes(version)),
+						//chaindid
+						block.chainid,
+						//verifyingContract
+						address(this)
+				)
+		);
 }
 ```  
+hashStruct(s) = keccak256(typeHash ‖ encodeData(s)) 임을 상기시켜보자. 여기서도 마찬가지로, domain에 대한 typeHash 값을 구한다. 이 typeHash 값과 Domain을 인코딩한 값을 concate하여 keccak256 해싱을 수행한다. 이로써 Domain Separator 값을 구할 수 있다. 여기서 우리는 별도의 함수가 아닌, constructor() 생성자에서 Domain Separator을 구한다. 이는 컨트렉트의 이름과 주소는 대부분 고정된 값으기 때문에 일반적으로 생성자 시점에 계산한다. 또한 가스비 절감을 위해 immutable 변수에 저장하였다.
+
+>하지만, proxy를 통한 upgradeable 컨트렉트의 경우에는 로직 컨트렉트의 주소가 변경될 수 있기 때문에 위의 방식을 사용할 수 없다. upgradeable 컨트렉트의 경우엔 [Openzeppelin의 EIP712Upgradeable](https://github.com/OpenZeppelin/openzeppelin-contracts-upgradeable/blob/master/contracts/utils/cryptography/EIP712Upgradeable.sol)를 참고해라
+
+이제 Domain Separator값과 hashStruct(Message) 값을 이용해 `eth_signTypedData`의 최종 결과 값인  `sign(keccak256("\x19\x01" ‖ domainSeparator ‖ hashStruct(message)))`을 구할 수 있다. 위의 컨트렉트들을 아래와 같이 합쳐 Remix에서 테스트해보자. 풀 코드는 아래와 같다.
+
+```solidity
+// SPDX-License-Identifier: GPL-3.0
+pragma solidity ^0.8.10;
+
+contract Example {
+
+    //structured Data 𝕊
+	struct Mail {
+	    address from;
+	    address to;
+	    string contents;
+	}
+
+    bytes32 public immutable DOMAIN_SEPARATOR;
+    bytes32 public constant EIP712DOMAIN_TYPEHASH = keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+	bytes32 public constant MAIL_TYPEHASH = keccak256("Mail(address from,address to,string contents)");
+
+    constructor (string memory name, string memory version) {
+		DOMAIN_SEPARATOR = keccak256(
+			abi.encode(
+				//typehash(eip712Domain)
+				EIP712DOMAIN_TYPEHASH,
+				//name
+				keccak256(bytes(name)),
+				//version
+				keccak256(bytes(version)),
+				//chaindid
+				block.chainid,
+				//verifyingContract
+				address(this)
+			)
+	    );
+    }
+
+	function hashStruct(Mail memory mail) internal pure returns (bytes32) {
+		return keccak256(
+            abi.encode(
+			    MAIL_TYPEHASH,
+			    mail.from,
+			    mail.to,
+			    keccak256(bytes(mail.contents))
+		    )
+        );
+	}
+
+    function signTypedData_v4(Mail memory mail) internal view returns (bytes32) {
+        return keccak256(
+            abi.encodePacked(
+                '\x19\x01',
+                DOMAIN_SEPARATOR,
+                hashStruct(mail)
+            )
+        );
+    }
+
+    function verify(Mail memory mail, uint8 v, bytes32 r, bytes32 s) internal view returns (bool) {
+    // Note: we need to use `encodePacked` here instead of `encode`.
+        bytes32 digest = keccak256(abi.encodePacked(
+            "\x19\x01",
+            DOMAIN_SEPARATOR,
+            hashStruct(mail)
+        ));
+        return ecrecover(digest, v, r, s) == mail.from;
+    }
 
 
-자세한 내용들은 해당 [블로그](https://medium.com/metamask/eip712-is-coming-what-to-expect-and-how-to-use-it-bb92fd1a7a26) 포스팅에서 확인할 수 있다.  
+    function test() public view returns (bool) {
+        // Example signed message
+        Mail memory mail = Mail({
+            from: 0xCD2a3d9F938E13CD947Ec05AbC7FE734Df8DD826,
+            to: 0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB,
+            contents: "Hello, Bob!"
+        });
+        uint8 v = 28;
+        bytes32 r = 0x4355c47d63924e8a72e509b65029052eb6c299d53a04e167c5775fd466751c9d;
+        bytes32 s = 0x07299936d304c153f6443dfa05f40ff007d72911b6f72307f996231605b91562;
+
+        // assert(DOMAIN_SEPARATOR == 0xf2cee375fa42b42143804025fc449deafd50cc031ca257e0b194a650a912090f);
+        // assert(hashStruct(mail) == 0xc52c0ee5d84264471806290a3f2c4cecfc5490626bf912d01f240d7a274b371e);
+        assert(verify(mail, v, r, s));
+        return true;
+    }
+}
+```
+
+위 코드에서 signTypedData_v4은 `\x19\x01` 값, DOMAIN_SEPARATOR 값, hashStruct(mail)값
 
 
 ### 서명을 이용한 공격 사례
 
-### Proxy Contract에서의 EIP712 구현
-[Openzeppelin의 EIP712Upgradeable](https://github.com/OpenZeppelin/openzeppelin-contracts-upgradeable/blob/master/contracts/utils/cryptography/EIP712Upgradeable.sol)
 ### 결론
 
 ---
@@ -153,13 +280,13 @@ struct Bid {
 많은 어플리케이션에서 서명은 토큰을 스왑하거나, NFT를 거래하는 등에 사용된다. 서명을 재사용하는 경우에 대한 대비책은 각 어플리케이션이 적절히 테스트하고 방비책을 만들어야한다. 이는 서명 메시지에 nonce 값을 포함하는 등의 방식으로 replay attack을 방지할 수 있다.  
 
 ### Reference
-1. [MetaMask's Guide for signing the data]
-2. [체인의 정석: EIP712]
+1. [Ethereum:EIP712](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-712.md)
+2. [MetaMask's Guide for signing the data]
 3. [Koh Wei Jie's Blog post for EIP712]
+4. [Hackernoon's Blog post for Wallet signature](https://medium.com/hackernoon/writing-for-blockchain-wallet-signature-request-messages-6ede721160d5)
 
 [EIP712]: https://github.com/ethereum/EIPs/blob/master/EIPS/eip-712.md
 [MetaMask's Guide for signing the data]: https://docs.metamask.io/guide/signing-data.html#a-brief-history
-[체인의 정석:EIP712]: https://it-timehacker.tistory.com/316
 [hackernoon]:https://medium.com/hackernoon/writing-for-blockchain-wallet-signature-request-messages-6ede721160d5
 [Koh Wei Jie's Blog post for EIP712]:https://medium.com/metamask/eip712-is-coming-what-to-expect-and-how-to-use-it-bb92fd1a7a26
 [0xProtocol]: https://github.com/0xProject/0x-monorepo/issues/162#issuecomment-328263512

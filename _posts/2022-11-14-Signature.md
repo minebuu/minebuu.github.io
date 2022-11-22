@@ -192,19 +192,19 @@ contract Example {
     bytes32 public constant EIP712DOMAIN_TYPEHASH = keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
 	bytes32 public constant MAIL_TYPEHASH = keccak256("Mail(address from,address to,string contents)");
 
-    constructor (string memory name, string memory version) {
+    constructor () {
 		DOMAIN_SEPARATOR = keccak256(
 			abi.encode(
 				//typehash(eip712Domain)
 				EIP712DOMAIN_TYPEHASH,
 				//name
-				keccak256(bytes(name)),
+				keccak256(bytes('Ether Mail')),
 				//version
-				keccak256(bytes(version)),
+				keccak256(bytes('1')),
 				//chaindid
 				block.chainid,
-				//verifyingContract
-				address(this)
+				//verifyingContract: address(this)
+				0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC
 			)
 	    );
     }
@@ -248,34 +248,177 @@ contract Example {
             to: 0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB,
             contents: "Hello, Bob!"
         });
-        uint8 v = 28;
-        bytes32 r = 0x4355c47d63924e8a72e509b65029052eb6c299d53a04e167c5775fd466751c9d;
-        bytes32 s = 0x07299936d304c153f6443dfa05f40ff007d72911b6f72307f996231605b91562;
+        uint8 v = 27;
+        bytes32 r = 0x62d5a74c1169f2fc1eb853841c0214f8c67a265f6a6f64f10a797264fc49f4db;
+        bytes32 s = 0x14152553afa0d8015e17d0c49698001c92f8b34483db8378c402214bedaf62e8;
 
-        // assert(DOMAIN_SEPARATOR == 0xf2cee375fa42b42143804025fc449deafd50cc031ca257e0b194a650a912090f);
-        // assert(hashStruct(mail) == 0xc52c0ee5d84264471806290a3f2c4cecfc5490626bf912d01f240d7a274b371e);
+        assert(DOMAIN_SEPARATOR == 0xf2cee375fa42b42143804025fc449deafd50cc031ca257e0b194a650a912090f);
+        assert(hashStruct(mail) == 0x91731d77ee842ec57699d1d9f0fba1d65d9b4ab7a074ebd935d3ea7eebbdf214);
         assert(verify(mail, v, r, s));
         return true;
     }
 }
 ```
-`eth_signTypedData`의 정의가 `sign(keccak256("\x19\x01" ‖ domainSeparator ‖ hashStruct(message)))`임을 상기해보자. 위 코드의 `verify` 함수에서 hash를 구하는 부분은 우리가 `signTypedData_v4`에서 sign 직전 `keccak256("\x19\x01" ‖ domainSeparator ‖ hashStruct(message))`값을 구하는 것과 같다. 여기서는 서명까지 수행하지는 않지만 (아래 자바스크립트 파트에서 수행한다), 스마트 컨트랙트에서 EIP712 서명을 어떻게 활용하는지 보여준다.  
+`eth_signTypedData`의 정의가 `sign(keccak256("\x19\x01" ‖ domainSeparator ‖ hashStruct(message)))`임을 상기해보자. 위 코드의 `verify` 함수에서 hash를 구하는 부분은 우리가 `signTypedData_v4`에서 sign 직전 `keccak256("\x19\x01" ‖ domainSeparator ‖ hashStruct(message))`값을 구하는 것과 같다. 여기서는 서명까지 수행하지는 않지만 (이는 프론트앤드 단에서 수행한다), 스마트 컨트랙트에서 EIP712 서명을 어떻게 활용하는지 보여준다.  
 
-우리는 서명 값(`v`,`r`,`s`)과 서명받는 데이터(`hash`)를 갖고 있을 때 `ecrecover` 함수를 통해 서명을 수행한 주소를 복구할 수 있다. 이렇게 복구된 주소가 트랜잭션을 제출한 주소인지, 혹은 데이터에서 표현된 특정 주소인지 (위 코드에서는 msg.from) 인증하는데 사용한다. 예를 들어, Uniswap v2의 [permit 함수](https://github.com/Uniswap/v2-core/blob/master/contracts/UniswapV2ERC20.sol#L81)는 가스 없이 서명을 통해 owner가 다른 유저 spender의 토큰 사용을 승인한다 ([EIP2612](https://eips.ethereum.org/EIPS/eip-2612)). 이 때 토큰 소유자 `owner`가 ecrecover 함수를 통해 복구된 서명자의 주소와 일치하는지를 확인한다. `ecrecover`에 대해 자세히 알고 싶다면 [What is ecrecover in Solidity?](https://soliditydeveloper.com/ecrecover/)를 참고해라.   
+우리는 서명 값(`v`,`r`,`s`)과 서명받는 데이터(`hash`)를 갖고 있을 때 `ecrecover` 함수를 통해 서명을 수행한 주소를 복구할 수 있다. 이렇게 복구된 주소가 트랜잭션을 제출한 주소인지, 혹은 데이터에서 표현된 특정 주소인지 (위 코드에서는 msg.from) 인증하는데 사용한다. 예를 들어, Uniswap v2의 [permit 함수](https://github.com/Uniswap/v2-core/blob/master/contracts/UniswapV2ERC20.sol#L81)는 가스 없이 서명을 통해 토큰 소유주인 owner가 다른 유저 spender에게 value만큼의 토큰 사용을 승인한다 ([EIP2612](https://eips.ethereum.org/EIPS/eip-2612)). 이 때 스마트 컨트랙트는 제출된 서명과 owner, spender, value 등의 값을 갖고, 토큰 소유자 `owner`가 ecrecover 함수를 통해 복구된 서명자의 주소와 일치하는지를 확인한다. `ecrecover`에 대해 자세히 알고 싶다면 [What is ecrecover in Solidity?](https://soliditydeveloper.com/ecrecover/)를 참고해라.   
 
+위의 코드에서 `verify` 함수는 mail의 from 주소가, 서명 데이터의 서명자와 일치하는지를 비교한다. 만약 일치한다면, 우리는 이 메일이 유효한 메일임을 검증할 수 있다. 여기서 우리는 mail 데이터를 통해 hash `keccak256("\x19\x01" ‖ domainSeparator ‖ hashStruct(message))`을 직접 계산한다는점에 주의해야한다.
 
-
-
-
-
+`test` 함수에서는 EIP712 구현과 verify가 정상적으로 동작하는지 체크한다. 여기서 v,r,s 값과 require() 구문에서 검사하는 값들은 아래 자바스크립트 코드를 통해 미리 구한 값들을 하드코딩하였다. Remix에서 해당 코드를 배포하고 실행할 시 test 함수가 정상적으로 통과하는 것을 확인할 수 있다.
 
 
+#### 자바스크립트를 통한 서명
+
+데이터에 대한 서명은 결국 블록체인 외부에서 만들어져야한다. 보통은 메타마스크와 같은 wallet에서 서명이 수행되지만([MetaMask example](https://docs.metamask.io/guide/signing-data.html#example)), 여기서는 편의를 위해 [ethereumjs-util](https://www.npmjs.com/package/ethereumjs-util) 라이브러리를 사용하는 자바스크립트 예시를 살펴보겠다. 해당 예시는 [EIP712] 문서의 [javascript example](https://github.com/ethereum/EIPs/blob/master/assets/eip-712/Example.js)을 참고하였다.
+
+```javascript
+// using ethereumjs-util 7.1.3
+const ethUtil = require('ethereumjs-util');
+
+// using ethereumjs-abi 0.6.9
+const abi = require('ethereumjs-abi');
+
+// using chai 4.3.4
+const chai = require('chai');
+
+const typedData = {
+    types: {
+        EIP712Domain: [
+            { name: 'name', type: 'string' },
+            { name: 'version', type: 'string' },
+            { name: 'chainId', type: 'uint256' },
+            { name: 'verifyingContract', type: 'address' },
+        ],
+        Mail: [
+            { name: 'from', type: 'address' },
+            { name: 'to', type: 'address' },
+            { name: 'contents', type: 'string' }
+        ],
+    },
+    primaryType: 'Mail',
+    domain: {
+        name: 'Ether Mail',
+        version: '1',
+        chainId: 1,
+        verifyingContract: '0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC',
+    },
+    message: {
+        from: '0xCD2a3d9F938E13CD947Ec05AbC7FE734Df8DD826',
+        to: '0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB',
+        contents: 'Hello, Bob!',
+    },
+};
+
+const types = typedData.types;
+
+// Recursively finds all the dependencies of a type
+function dependencies(primaryType, found = []) {
+    if (found.includes(primaryType)) {
+        return found;
+    }
+    if (types[primaryType] === undefined) {
+        return found;
+    }
+    found.push(primaryType);
+    for (let field of types[primaryType]) {
+        for (let dep of dependencies(field.type, found)) {
+            if (!found.includes(dep)) {
+                found.push(dep);
+            }
+        }
+    }
+    return found;
+}
+
+function encodeType(primaryType) {
+    // Get dependencies primary first, then alphabetical
+    let deps = dependencies(primaryType);
+    deps = deps.filter(t => t != primaryType);
+    deps = [primaryType].concat(deps.sort());
+
+    // Format as a string with fields
+    let result = '';
+    for (let type of deps) {
+        result += `${type}(${types[type].map(({ name, type }) => `${type} ${name}`).join(',')})`;
+    }
+    return result;
+}
+
+function typeHash(primaryType) {
+    return ethUtil.keccakFromString(encodeType(primaryType), 256);
+}
+
+function encodeData(primaryType, data) {
+    let encTypes = [];
+    let encValues = [];
+
+    // Add typehash
+    encTypes.push('bytes32');
+    encValues.push(typeHash(primaryType));
+
+    // Add field contents
+    for (let field of types[primaryType]) {
+        let value = data[field.name];
+        if (field.type == 'string' || field.type == 'bytes') {
+            encTypes.push('bytes32');
+            value = ethUtil.keccakFromString(value, 256);
+            encValues.push(value);
+        } else if (types[field.type] !== undefined) {
+            encTypes.push('bytes32');
+            value = ethUtil.keccak256(encodeData(field.type, value));
+            encValues.push(value);
+        } else if (field.type.lastIndexOf(']') === field.type.length - 1) {
+            throw 'TODO: Arrays currently unimplemented in encodeData';
+        } else {
+            encTypes.push(field.type);
+            encValues.push(value);
+        }
+    }
+
+    return abi.rawEncode(encTypes, encValues);
+}
+
+function structHash(primaryType, data) {
+    return ethUtil.keccak256(encodeData(primaryType, data));
+}
+
+function signHash() {
+    return ethUtil.keccak256(
+        Buffer.concat([
+            Buffer.from('1901', 'hex'),
+            structHash('EIP712Domain', typedData.domain),
+            structHash(typedData.primaryType, typedData.message),
+        ]),
+    );
+}
+console.log(typedData.message);
+
+const privateKey = ethUtil.keccakFromString('cow', 256);
+const address = ethUtil.privateToAddress(privateKey);
+console.log("signer: 0x" +address.toString('hex'));
+
+const sig = ethUtil.ecsign(signHash(), privateKey);
+console.log("sig.v:" + sig.v);
+console.log("sig.r: 0x" + sig.r.toString('hex'));
+console.log("sig.s: 0x" + sig.s.toString('hex'));
+
+console.log("DomainSeparator: 0x" + structHash('EIP712Domain', typedData.domain).toString('hex'));
+console.log("HashStruct(mail): 0x" + structHash(typedData.primaryType, typedData.message).toString('hex'));
+```
+
+
+<p style="text-align: center;">
+	<img src="{{ site.url }}/assets/images/Signature/javascript_result.png" alt="Drawing" style="max-width: 80%; height: auto;"/>
+	<figcaption align = "center"><b>Figure 5. 자바스크립트에서의 메시지, 서명인 주소, 서명 v,r,s 값</b></figcaption>
+</p>
 
 ### 서명을 이용한 공격 사례
+오픈씨
 
 ### 결론
+그 동안 익숙하게 사용해왔지만 자세한 내용은 몰랐던 서명에 대해 알아보았다. raw transaction에 대한 서명이 가능해 피싱 공격에 취약했던 초기 `eth_sign`과 이에 prefix 문자열(`"\x19Ethereum Signed Message:\n" + len(message)`)을 넣어 피싱 문제를 개선한 `personal_sign`, 그리고 서명하는 데이터를 사용자에게 보여주고, 서명이 목적외로 사용되는 피싱 공격을 방지할 수 있는 EIP712 서명에 대해 자세히 알아보았다. EIP712의 서명은 Domain과 Message 부분으로 나뉘며, 개발자는 프로토콜의 명세에 맞게 Message 부분을 자유롭게 설계할 수 있다. 이러한 서명은 현재 Opensea의 [Seaport](https://github.com/ProjectOpenSea/seaport/blob/main/contracts/lib/Verifiers.sol), Uniswap의 [Permit2](https://github.com/Uniswap/permit2) 등 다양한 어플리케이션에서 활용되고 있다. EIP712는 매우 중요하고, 많은 코드에서 사용되는 부분인만큼 이번 기회를 통해 확실히 알아두면 활용할 곳이 많을 것이다.    
 
----
 ### Appendix
 
 * Personal_sign
@@ -285,7 +428,7 @@ contract Example {
 
 * 재사용 공격(Replay Attack)
 
-많은 어플리케이션에서 서명은 토큰을 스왑하거나, NFT를 거래하는 등에 사용된다. 서명을 재사용하는 경우에 대한 대비책은 각 어플리케이션이 적절히 테스트하고 방비책을 만들어야한다. 이는 서명 메시지에 nonce 값을 포함하는 등의 방식으로 replay attack을 방지할 수 있다.  
+많은 어플리케이션에서 서명은 토큰을 스왑하거나, NFT를 거래하는 등에 사용된다. 같은 서명을 재사용하는 경우에 대한 대비책은 각 어플리케이션이 적절히 테스트하고 방비책을 만들어야한다. 이는 Uniswap의 ERC20 [permit](https://github.com/Uniswap/v2-core/blob/master/contracts/UniswapV2ERC20.sol#L87) 예시처럼 서명 메시지에 nonces[owner] 값을 포함하고, 서명 메시지가 사용될 경우 nonces[owner] 값을 증가시키는 방식으로 replay attack을 방지할 수 있다.  
 
 ### Reference
 1. [Ethereum:EIP712](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-712.md)

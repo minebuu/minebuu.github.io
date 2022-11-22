@@ -173,7 +173,7 @@ hashStruct(s) = keccak256(typeHash ‖ encodeData(s)) 임을 상기시켜보자.
 
 >하지만, proxy를 통한 upgradeable 컨트렉트의 경우에는 로직 컨트렉트의 주소가 변경될 수 있기 때문에 위의 방식을 사용할 수 없다. upgradeable 컨트렉트의 경우엔 [Openzeppelin의 EIP712Upgradeable](https://github.com/OpenZeppelin/openzeppelin-contracts-upgradeable/blob/master/contracts/utils/cryptography/EIP712Upgradeable.sol)를 참고해라
 
-이제 Domain Separator값과 hashStruct(Message) 값을 이용해 EIP712를 어떻게 활용하는지를 알아보게싿. 위의 컨트렉트들을 아래와 같이 합쳐 Remix에서 테스트해보자. 풀 코드는 아래와 같다.
+이제 Domain Separator값과 hashStruct(Message) 값을 이용해 EIP712를 어떻게 활용하는지를 알아보겠다. 위의 컨트렉트들을 아래와 같이 합쳐 [Remix](https://remix.ethereum.org/)에서 테스트해보자. 풀 코드는 아래와 같다.
 
 ```solidity
 // SPDX-License-Identifier: GPL-3.0
@@ -220,16 +220,6 @@ contract Example {
         );
 	}
 
-    function signTypedData_v4(Mail memory mail) internal view returns (bytes32) {
-        return keccak256(
-            abi.encodePacked(
-                '\x19\x01',
-                DOMAIN_SEPARATOR,
-                hashStruct(mail)
-            )
-        );
-    }
-
     function verify(Mail memory mail, uint8 v, bytes32 r, bytes32 s) internal view returns (bool) {
     // Note: we need to use `encodePacked` here instead of `encode`.
         bytes32 hash = keccak256(abi.encodePacked(
@@ -265,7 +255,7 @@ contract Example {
 
 위의 코드에서 `verify` 함수는 mail의 from 주소가, 서명 데이터의 서명자와 일치하는지를 비교한다. 만약 일치한다면, 우리는 이 메일이 유효한 메일임을 검증할 수 있다. 여기서 우리는 mail 데이터를 통해 hash `keccak256("\x19\x01" ‖ domainSeparator ‖ hashStruct(message))`을 직접 계산한다는점에 주의해야한다.
 
-`test` 함수에서는 EIP712 구현과 verify가 정상적으로 동작하는지 체크한다. 여기서 v,r,s 값과 require() 구문에서 검사하는 값들은 아래 자바스크립트 코드를 통해 미리 구한 값들을 하드코딩하였다. Remix에서 해당 코드를 배포하고 실행할 시 test 함수가 정상적으로 통과하는 것을 확인할 수 있다.
+`test` 함수에서는 EIP712 구현과 verify가 정상적으로 동작하는지 체크한다. 여기서 v,r,s 값과 require() 구문에서 검사하는 값들은 아래 자바스크립트 코드를 통해 미리 구한 값들을 하드코딩하였다. [Remix](https://remix.ethereum.org/)에서 해당 코드를 배포하고 실행할 시 test 함수가 정상적으로 통과하는 것을 확인할 수 있다.
 
 
 #### 자바스크립트를 통한 서명
@@ -386,8 +376,11 @@ function structHash(primaryType, data) {
 function signHash() {
     return ethUtil.keccak256(
         Buffer.concat([
+						//\x19\x01
             Buffer.from('1901', 'hex'),
+						//DomainSeparator
             structHash('EIP712Domain', typedData.domain),
+						//structHash(Mail)
             structHash(typedData.primaryType, typedData.message),
         ]),
     );
@@ -407,14 +400,15 @@ console.log("DomainSeparator: 0x" + structHash('EIP712Domain', typedData.domain)
 console.log("HashStruct(mail): 0x" + structHash(typedData.primaryType, typedData.message).toString('hex'));
 ```
 
+위 코드에 대해 자세히 설명하지는 않겠지만, 로직은 위의 스마트 컨트렉트와 동일하다. `signHash()` 함수는 EIP712의 `signTypedData_v4` 함수와 동일하다. 우리는 해당 코드를 통해 `0xcd2a3d9f938e13cd947ec05abc7fe734df8dd826`가 mail 메시지에 서명한 ECDSA 서명 값 v,r,s를 구할 수 있다. 결과는 아래와 같으며 앞서 살펴보았던 스마트 컨트렉트 코드의 `test` 함수에 사용되었다.
 
 <p style="text-align: center;">
 	<img src="{{ site.url }}/assets/images/Signature/javascript_result.png" alt="Drawing" style="max-width: 80%; height: auto;"/>
 	<figcaption align = "center"><b>Figure 5. 자바스크립트에서의 메시지, 서명인 주소, 서명 v,r,s 값</b></figcaption>
 </p>
 
-### 서명을 이용한 공격 사례
-오픈씨
+<!-- ### 서명을 이용한 공격 사례 -->
+<!-- 오픈씨 -->
 
 ### 결론
 그 동안 익숙하게 사용해왔지만 자세한 내용은 몰랐던 서명에 대해 알아보았다. raw transaction에 대한 서명이 가능해 피싱 공격에 취약했던 초기 `eth_sign`과 이에 prefix 문자열(`"\x19Ethereum Signed Message:\n" + len(message)`)을 넣어 피싱 문제를 개선한 `personal_sign`, 그리고 서명하는 데이터를 사용자에게 보여주고, 서명이 목적외로 사용되는 피싱 공격을 방지할 수 있는 EIP712 서명에 대해 자세히 알아보았다. EIP712의 서명은 Domain과 Message 부분으로 나뉘며, 개발자는 프로토콜의 명세에 맞게 Message 부분을 자유롭게 설계할 수 있다. 이러한 서명은 현재 Opensea의 [Seaport](https://github.com/ProjectOpenSea/seaport/blob/main/contracts/lib/Verifiers.sol), Uniswap의 [Permit2](https://github.com/Uniswap/permit2) 등 다양한 어플리케이션에서 활용되고 있다. EIP712는 매우 중요하고, 많은 코드에서 사용되는 부분인만큼 이번 기회를 통해 확실히 알아두면 활용할 곳이 많을 것이다.    

@@ -140,7 +140,7 @@ contract Example {
 ```
 위 코드를 보면, Mail 구조체의 hashStruct를 어떻게 구하는지 쉽게 이해할 수 있을 것이다. 우선 TypeHash는 앞서 설명한대로 1. 정해진 규칙에 맞춰 인코딩 된 값에 keccak256 해시함수를 적용하여 계산한다. 2. hashStruct는 typeHash와 encodeData(Mail)을 concate하여 keccak256 해시 함수를 적용함으로써 계산한다. 여기서 3. encodeData는 위에서 언급했듯이 구조체의 모든 값들에 대해 `enc(value₁) ‖ enc(value₂) ‖ … ‖ enc(valueₙ)`를 수행한다. 다만 string과 같은 dynamic 값들은 keccak256를 적용함으로써 32바이트 길이로 통일 시켜줘야한다.     
 
-> hashStruct 함수에서 왜 해시함수 전에 abi.encode를 쓸까? 이에 대한 [Openzeppelin 포럼](https://forum.openzeppelin.com/t/abi-encode-vs-abi-encodepacked/2948) QnA
+> hashStruct 함수에서 왜 해시함수 전에 `abi.encode`를 쓸까? keccak256 해시 함수는 한개의 bytes 인자를 받는데, 그렇기 때문에 여러 파라미터들을 하나의 bytes로 묶는 과정이 필요하다. 여기서 `abi.encodePacked`가 아닌 `abi.encode`를 쓴 이유는, encodeData(s) = `enc(value₁) ‖ enc(value₂) ‖ … ‖ enc(valueₙ)`에서 모든 value를 32 바이트 길이로 통일시켜줘야 하기 때문이다.  
 
 #### domainSeparator
 위에서 hashStruct(Mail mail) 값을 구해봤지만, 우리는 Domain Sapartor라는 값도 구해야한다. Domain Saparator역시 위 과정과 매우 유사하게 구할 수 있다. 정의는 다음과 같다: `domainSeparator = hashStruct(eip712Domain)`
@@ -173,7 +173,7 @@ hashStruct(s) = keccak256(typeHash ‖ encodeData(s)) 임을 상기시켜보자.
 
 >하지만, proxy를 통한 upgradeable 컨트렉트의 경우에는 로직 컨트렉트의 주소가 변경될 수 있기 때문에 위의 방식을 사용할 수 없다. upgradeable 컨트렉트의 경우엔 [Openzeppelin의 EIP712Upgradeable](https://github.com/OpenZeppelin/openzeppelin-contracts-upgradeable/blob/master/contracts/utils/cryptography/EIP712Upgradeable.sol)를 참고해라
 
-이제 Domain Separator값과 hashStruct(Message) 값을 이용해 `eth_signTypedData`의 최종 결과 값인  `sign(keccak256("\x19\x01" ‖ domainSeparator ‖ hashStruct(message)))`을 구할 수 있다. 위의 컨트렉트들을 아래와 같이 합쳐 Remix에서 테스트해보자. 풀 코드는 아래와 같다.
+이제 Domain Separator값과 hashStruct(Message) 값을 이용해 EIP712를 어떻게 활용하는지를 알아보게싿. 위의 컨트렉트들을 아래와 같이 합쳐 Remix에서 테스트해보자. 풀 코드는 아래와 같다.
 
 ```solidity
 // SPDX-License-Identifier: GPL-3.0
@@ -232,12 +232,12 @@ contract Example {
 
     function verify(Mail memory mail, uint8 v, bytes32 r, bytes32 s) internal view returns (bool) {
     // Note: we need to use `encodePacked` here instead of `encode`.
-        bytes32 digest = keccak256(abi.encodePacked(
+        bytes32 hash = keccak256(abi.encodePacked(
             "\x19\x01",
             DOMAIN_SEPARATOR,
             hashStruct(mail)
         ));
-        return ecrecover(digest, v, r, s) == mail.from;
+        return ecrecover(hash, v, r, s) == mail.from;
     }
 
 
@@ -259,8 +259,16 @@ contract Example {
     }
 }
 ```
+`eth_signTypedData`의 정의가 `sign(keccak256("\x19\x01" ‖ domainSeparator ‖ hashStruct(message)))`임을 상기해보자. 위 코드의 `verify` 함수에서 hash를 구하는 부분은 우리가 `signTypedData_v4`에서 sign 직전 `keccak256("\x19\x01" ‖ domainSeparator ‖ hashStruct(message))`값을 구하는 것과 같다. 여기서는 서명까지 수행하지는 않지만 (아래 자바스크립트 파트에서 수행한다), 스마트 컨트랙트에서 EIP712 서명을 어떻게 활용하는지 보여준다.  
 
-위 코드에서 signTypedData_v4은 `\x19\x01` 값, DOMAIN_SEPARATOR 값, hashStruct(mail)값
+우리는 서명 값(`v`,`r`,`s`)과 서명받는 데이터(`hash`)를 갖고 있을 때 `ecrecover` 함수를 통해 서명을 수행한 주소를 복구할 수 있다. 이렇게 복구된 주소가 트랜잭션을 제출한 주소인지, 혹은 데이터에서 표현된 특정 주소인지 (위 코드에서는 msg.from) 인증하는데 사용한다. 예를 들어, Uniswap v2의 [permit 함수](https://github.com/Uniswap/v2-core/blob/master/contracts/UniswapV2ERC20.sol#L81)는 가스 없이 서명을 통해 owner가 다른 유저 spender의 토큰 사용을 승인한다 ([EIP2612](https://eips.ethereum.org/EIPS/eip-2612)). 이 때 토큰 소유자 `owner`가 ecrecover 함수를 통해 복구된 서명자의 주소와 일치하는지를 확인한다. `ecrecover`에 대해 자세히 알고 싶다면 [What is ecrecover in Solidity?](https://soliditydeveloper.com/ecrecover/)를 참고해라.   
+
+
+
+
+
+
+
 
 
 ### 서명을 이용한 공격 사례

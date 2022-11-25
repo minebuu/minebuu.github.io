@@ -1,0 +1,19 @@
+I"�<!-- jekyll serve --drafts -->
+
+<h3 id="introduction">Introduction</h3>
+
+<p>test</p>
+<h3 id="wyvern-v22-취약점">Wyvern v2.2 취약점</h3>
+
+<p>2022년 1분기에, Gus, 오픈씨 보안 개발자, Wyvern 프로토콜 개발자 그리고 samczsun에 의해서 offer를 수행한 사용자들에게서 ETH를 탈취할 수 있는 취약점이 발견되었다. 해당 취약점은 리스팅과 offer를 수행한 유저들이 별다른 행동을 하지 않더라도 악용이 가능하였다.</p>
+
+<h3 id="yul을-통한-seaport의-가스-최적화">Yul을 통한 Seaport의 가스 최적화</h3>
+
+<h3 id="reference">Reference</h3>
+<ol>
+  <li><a href="https://nft.mirror.xyz/VdF3BYwuzXgLrJglw5xF6CHcQfAVbqeJVtueCr4BUzs">CTO of Opensa: A critical vulnerability in Wyvern Protocol</a></li>
+  <li><a href="https://blog.audit.haechi.io/wyvern_v2_2_1_1day_vulnerabilities">Haechi Audit: Wyvern v2.2 1-day Vulnerabilities</a></li>
+  <li><a href="https://github.com/ethereum/EIPs/blob/master/EIPS/eip-712.md">EIP712</a></li>
+</ol>
+
+:ET

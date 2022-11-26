@@ -1,0 +1,28 @@
+I"�<!-- jekyll serve --drafts -->
+
+<h3 id="introduction">Introduction</h3>
+
+<p>test</p>
+<h3 id="wyvern-v22-취약점">Wyvern v2.2 취약점</h3>
+
+<p>2022년 1분기에, Gus, 오픈씨 보안 개발자, Wyvern 프로토콜 개발자 그리고 samczsun에 의해서 offer를 수행한 사용자들에게서 ETH를 탈취할 수 있는 취약점이 발견되었다. 해당 취약점은 리스팅과 offer를 수행한 유저들이 정상적인 서명과 행동을 수행했더라도, 별다른 추가 활동 없이 악용이 가능하였다. 그동안의 로그 상으론 해당 취약점으로 인한 피해는 없었다고 하였으나, 해당 시점에 오픈씨의 여러 해킹 사건이 발생했었는데 연관이 있는지는 추후 체크해보도록 하겠다.</p>
+
+<p>[<a href="https://nft.mirror.xyz/VdF3BYwuzXgLrJglw5xF6CHcQfAVbqeJVtueCr4BUzs">CTO of Opensa: A critical vulnerability in Wyvern Protocol</a>에서 이 취약점에 대해 자세히 설명하고있다. 해당 취약점은</p>
+
+<p>이는 <code class="language-plaintext highlighter-rouge">abi.encodePacked</code>을 서명, 인증 및 데이터 무결성 체크에 확인할 때 주의해야하는 이유와 비슷하다.
+<code class="language-plaintext highlighter-rouge">keccak256(abi.encodePacked(a, b))</code>를 계산할 때 a와 b가 string, bytes와 같은 동적 타입이라면 a와 b의 값 일부를 서로 간에 이동시켜도 동일한 결과 값을 얻을 수 있다. 예시로 변수 string a = “test”, string b = “collision”이라고 해보자. <code class="language-plaintext highlighter-rouge">keccak256(abi.encodePacked(a, b)) = keccak256(abi.encodePacked("test", "collision")) = keccak256(abi.encodePacked("te", "stcollision"))</code>와 동일하다. 따라서 특별한 이유가 없다면 abi.encode 사용을 권고한다. 이러한 경고는 <a href="https://docs.soliditylang.org/en/latest/abi-spec.html#non-standard-packed-mode">Solidity Docs</a>에 non-standard mode의 주의사항으로 나와있다.</p>
+
+<blockquote>
+  <p>hashStruct 함수에서 왜 해시함수 전에 abi.encode를 쓸까? keccak256 해시 함수는 한개의 bytes 인자를 받는데, 그렇기 때문에 여러 파라미터들을 하나의 bytes로 묶는 과정이 필요하다. 여기서 abi.encodePacked가 아닌 abi.encode를 쓴 이유는, encodeData(s) = enc(value₁) ‖ enc(value₂) ‖ … ‖ enc(valueₙ)에서 모든 value를 32 바이트 길이로 통일시켜줘야 하기 때문이다.</p>
+</blockquote>
+
+<h3 id="yul을-통한-seaport의-가스-최적화">Yul을 통한 Seaport의 가스 최적화</h3>
+
+<h3 id="reference">Reference</h3>
+<ol>
+  <li><a href="https://nft.mirror.xyz/VdF3BYwuzXgLrJglw5xF6CHcQfAVbqeJVtueCr4BUzs">CTO of Opensa: A critical vulnerability in Wyvern Protocol</a></li>
+  <li><a href="https://blog.audit.haechi.io/wyvern_v2_2_1_1day_vulnerabilities">Haechi Audit: Wyvern v2.2 1-day Vulnerabilities</a></li>
+  <li><a href="https://github.com/ethereum/EIPs/blob/master/EIPS/eip-712.md">EIP712</a></li>
+</ol>
+
+:ET

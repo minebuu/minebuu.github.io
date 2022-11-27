@@ -1,0 +1,26 @@
+I"�<!-- jekyll serve --drafts -->
+
+<h3 id="introduction">Introduction</h3>
+
+<p>test</p>
+<h3 id="wyvern-v22-취약점">Wyvern v2.2 취약점</h3>
+
+<p>2022년 1분기에, Gus, 오픈씨 보안 개발자, Wyvern 프로토콜 개발자 그리고 samczsun에 의해서 offer를 수행한 사용자들에게서 ETH를 탈취할 수 있는 취약점이 발견되었다. 해당 취약점은 리스팅과 offer를 수행한 유저들이 정상적인 서명과 행동을 수행했더라도, 별다른 추가 활동 없이 악용이 가능하였다. 다만 그동안의 로그상으론 해당 취약점을 이용한 공격은 없었다고 한다.</p>
+
+<p><a href="https://nft.mirror.xyz/VdF3BYwuzXgLrJglw5xF6CHcQfAVbqeJVtueCr4BUzs">CTO of Opensa: A critical vulnerability in Wyvern Protocol</a>에서 이 취약점에 대해 자세히 설명하고있다. 해당 취약점은 Horton 원칙을 위반하면서 발생하였다. Hortion 원칙은 암호학 시스템의 디자인 원칙으로서, “말하는 바가 아니라 의미하는 바를 인증해라 (Authenticate what is being meant, not what is being said)”라는 표현이다. 이러한 원칙은 메시지 인증 코드(Message Authentication Codes)를 사용할 때 매우 중요한데, 앨리스가 밥에게 메시지 <code class="language-plaintext highlighter-rouge">m := a | b | c</code>을 MAC과 함께 보내 메시지를 인증하더라도, 밥이 해당 메시지를 컴포넌트 a, b, c로 정확히 분할하는 방법을 모른다면 잘못된 의미로 해석될 수 있다. 따라서 Hortion 원칙은 메시지 그 자체가 아닌 의미하는 바(meaning)를 인증하도록 한다. 예를 들어, MAC은 메시지 m의 바이트 스트링 자체만을 인증하므로, 메시지 m이 구성되는 방식 또한 인증하도록 하여야한다. 이는 <a href="https://github.com/ethereum/EIPs/blob/master/EIPS/eip-712.md">EIP712</a>처럼 메시지를 구조화, 형식화하고 메시지의 포맷을 서명에 포함하도록 함으로써 문제를 해결할 수 있다. 이제 Horton 원칙을 위반해서 발생했던 Wyvern v2.2 취약점에 대해 자세히 알아보자.</p>
+
+<blockquote>
+  <p>이는 <code class="language-plaintext highlighter-rouge">abi.encodePacked</code>을 서명, 인증 및 데이터 무결성 체크에 확인할 때 주의해야하는 이유와 비슷하다.
+<code class="language-plaintext highlighter-rouge">keccak256(abi.encodePacked(a, b))</code>를 계산할 때 a와 b가 string, bytes와 같은 동적 타입이라면 a와 b의 값 일부를 서로 간에 이동시켜도 동일한 결과 값을 얻을 수 있다. 예시로 변수 string a = “test”, string b = “collision”이라고 해보자. <code class="language-plaintext highlighter-rouge">keccak256(abi.encodePacked(a, b)) = keccak256(abi.encodePacked("test", "collision")) = keccak256(abi.encodePacked("te", "stcollision"))</code>와 동일하다. 따라서 특별한 이유가 없다면 abi.encode 사용을 권고한다. 이러한 경고는 <a href="https://docs.soliditylang.org/en/latest/abi-spec.html#non-standard-packed-mode">Solidity Docs</a>에 non-standard mode의 주의사항으로 나와있다.</p>
+</blockquote>
+
+<h3 id="yul을-통한-seaport의-가스-최적화">Yul을 통한 Seaport의 가스 최적화</h3>
+
+<h3 id="reference">Reference</h3>
+<ol>
+  <li><a href="https://nft.mirror.xyz/VdF3BYwuzXgLrJglw5xF6CHcQfAVbqeJVtueCr4BUzs">CTO of Opensa: A critical vulnerability in Wyvern Protocol</a></li>
+  <li><a href="https://blog.audit.haechi.io/wyvern_v2_2_1_1day_vulnerabilities">Haechi Audit: Wyvern v2.2 1-day Vulnerabilities</a></li>
+  <li><a href="https://github.com/ethereum/EIPs/blob/master/EIPS/eip-712.md">EIP712</a></li>
+</ol>
+
+:ET

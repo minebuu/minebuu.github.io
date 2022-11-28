@@ -1,0 +1,140 @@
+I"�X<!-- jekyll serve --drafts -->
+
+<h3 id="introduction">Introduction</h3>
+
+<p>test</p>
+<h3 id="wyvern-v22-취약점">Wyvern v2.2 취약점</h3>
+
+<p>2022년 1분기에, 오픈씨가 사용하던 Wyvern v2.2 프로토콜 컨트랙트에서 크리티컬한 취약점이 발견되었다. 해당 취약점을 이용하면, 공격자는 offer를 수행한 사용자들에게서 ETH를 탈취할 수 있었다. 다행인 점은 문제가 발견되고 그동안의 로그를 분석해봤을 때 해당 취약점을 이용한 공격은 없었다고 한다. 오픈씨는 off-chain 서명을 통해 거래를 처리해왔는데, 해당 서명에서 사용하던 order 구조체에서 취약점이 발견되었다.</p>
+
+<p><a href="https://nft.mirror.xyz/VdF3BYwuzXgLrJglw5xF6CHcQfAVbqeJVtueCr4BUzs">CTO of Opensa: A critical vulnerability in Wyvern Protocol</a>에서 이 취약점에 대해 자세히 설명하고있다. 해당 취약점은 Horton 원칙을 위반하면서 발생하였다. Hortion 원칙은 암호학 시스템의 디자인 원칙으로서, “말하는 바가 아니라 의미하는 바를 인증해라 (Authenticate what is being meant, not what is being said)”라는 표현이다. 이러한 원칙은 메시지 인증 코드(Message Authentication Codes, MAC)를 사용할 때 매우 중요한데, 앨리스가 밥에게 메시지 <code class="language-plaintext highlighter-rouge">m := a | b | c</code>을 MAC과 함께 보내 메시지를 인증하더라도, 밥이 해당 메시지를 컴포넌트 a, b, c로 정확히 분할하는 방법을 모른다면 잘못된 의미로 해석될 수 있다. 따라서 Hortion 원칙은 메시지 그 자체가 아닌 의미하는 바(meaning)를 인증하도록 한다. 예를 들어, MAC은 메시지 m의 바이트 스트링 자체만을 인증하므로, 메시지 m이 구성되는 방식 또한 인증하도록 하여야한다. 이는 <a href="https://github.com/ethereum/EIPs/blob/master/EIPS/eip-712.md">EIP712</a>처럼 메시지를 구조화, 형식화하고 메시지의 포맷을 서명에 포함하도록 함으로써 문제를 해결할 수 있다. 이제 Horton 원칙을 위반해서 발생했던 Wyvern v2.2 취약점에 대해 자세히 알아보자.</p>
+
+<p>오픈씨에서는 off-chain 서명을 통해 판매와 구매를 수행한다. Wyvern v2.2에서는 <a href="https://github.com/ethereum/EIPs/blob/master/EIPS/eip-712.md">EIP712</a>가 적용되기 전으로 아래 코드에 나와있는 <a href="https://github.com/ProjectWyvern/wyvern-ethereum/blob/master/contracts/exchange/ExchangeCore.sol#L92">order 구조체</a>에 서명을 수행한다.</p>
+
+<div class="language-solidity highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="cm">/* An order on the exchange. */</span>
+<span class="k">struct</span> <span class="n">Order</span> <span class="p">{</span>
+    <span class="cm">/* Exchange address, intended as a versioning mechanism. */</span>
+    <span class="kt">address</span> <span class="n">exchange</span><span class="p">;</span>
+    <span class="cm">/* Order maker address. */</span>
+    <span class="kt">address</span> <span class="n">maker</span><span class="p">;</span>
+    <span class="cm">/* Order taker address, if specified. */</span>
+    <span class="kt">address</span> <span class="n">taker</span><span class="p">;</span>
+    <span class="cm">/* Maker relayer fee of the order, unused for taker order. */</span>
+    <span class="kt">uint</span> <span class="n">makerRelayerFee</span><span class="p">;</span>
+    <span class="cm">/* Taker relayer fee of the order, or maximum taker fee for a taker order. */</span>
+    <span class="kt">uint</span> <span class="n">takerRelayerFee</span><span class="p">;</span>
+    <span class="cm">/* Maker protocol fee of the order, unused for taker order. */</span>
+    <span class="kt">uint</span> <span class="n">makerProtocolFee</span><span class="p">;</span>
+    <span class="cm">/* Taker protocol fee of the order, or maximum taker fee for a taker order. */</span>
+    <span class="kt">uint</span> <span class="n">takerProtocolFee</span><span class="p">;</span>
+    <span class="cm">/* Order fee recipient or zero address for taker order. */</span>
+    <span class="kt">address</span> <span class="n">feeRecipient</span><span class="p">;</span>
+    <span class="cm">/* Fee method (protocol token or split fee). */</span>
+    <span class="n">FeeMethod</span> <span class="n">feeMethod</span><span class="p">;</span>
+    <span class="cm">/* Side (buy/sell). */</span>
+    <span class="n">SaleKindInterface</span><span class="p">.</span><span class="n">Side</span> <span class="n">side</span><span class="p">;</span>
+    <span class="cm">/* Kind of sale. */</span>
+    <span class="n">SaleKindInterface</span><span class="p">.</span><span class="n">SaleKind</span> <span class="n">saleKind</span><span class="p">;</span>
+    <span class="cm">/* Target. */</span>
+    <span class="kt">address</span> <span class="n">target</span><span class="p">;</span>
+    <span class="cm">/* HowToCall. */</span>
+    <span class="n">AuthenticatedProxy</span><span class="p">.</span><span class="n">HowToCall</span> <span class="n">howToCall</span><span class="p">;</span>
+    <span class="cm">/* Calldata. */</span>
+    <span class="kt">bytes</span> <span class="k">calldata</span><span class="p">;</span>
+    <span class="cm">/* Calldata replacement pattern, or an empty byte array for no replacement. */</span>
+    <span class="kt">bytes</span> <span class="n">replacementPattern</span><span class="p">;</span>
+    <span class="cm">/* Static call target, zero-address for no static call. */</span>
+    <span class="kt">address</span> <span class="n">staticTarget</span><span class="p">;</span>
+    <span class="cm">/* Static call extra data. */</span>
+    <span class="kt">bytes</span> <span class="n">staticExtradata</span><span class="p">;</span>
+    <span class="cm">/* Token used to pay for the order, or the zero-address as a sentinel value for Ether. */</span>
+    <span class="kt">address</span> <span class="n">paymentToken</span><span class="p">;</span>
+    <span class="cm">/* Base price of the order (in paymentTokens). */</span>
+    <span class="kt">uint</span> <span class="n">basePrice</span><span class="p">;</span>
+    <span class="cm">/* Auction extra parameter - minimum bid increment for English auctions, starting/ending price difference. */</span>
+    <span class="kt">uint</span> <span class="n">extra</span><span class="p">;</span>
+    <span class="cm">/* Listing timestamp. */</span>
+    <span class="kt">uint</span> <span class="n">listingTime</span><span class="p">;</span>
+    <span class="cm">/* Expiration timestamp - 0 for no expiry. */</span>
+    <span class="kt">uint</span> <span class="n">expirationTime</span><span class="p">;</span>
+    <span class="cm">/* Order salt, used to prevent duplicate hashes. */</span>
+    <span class="kt">uint</span> <span class="n">salt</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>위 코드처럼 order는 거래에 사용되는 매우 많은 데이터들을 담고 있는데, 이 order는 구매자 혹은 판매자에 의해 해시함수를 거쳐 서명된다. 문제가 되는 부분은 <code class="language-plaintext highlighter-rouge">calldata</code>, <code class="language-plaintext highlighter-rouge">replacementPattern</code>, <code class="language-plaintext highlighter-rouge">staticExtradata</code>와 같은 Bytes 데이터들이다. 아래 order 구조체를 해싱하는 <code class="language-plaintext highlighter-rouge">hashOrder</code> 함수를 살펴보자. 아래 함수는 order 구조체에 대해 <code class="language-plaintext highlighter-rouge">keccak256(abi.encodePacked(hashOrder))</code>를 수행한 것과 동일하다. 정해진 길이가 없는 임의의 값들이기 때문에 해당 데이터들간에 바이트들을 이동 (shifted) 시킴으로써 공격이 수행될 수 있다.</p>
+
+<div class="language-solidity highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="cm">/**
+ * @dev Hash an order, returning the canonical order hash, without the message prefix
+ * @param order Order to hash
+ * @return Hash of order
+ */</span>
+<span class="k">function</span> <span class="n">hashOrder</span><span class="p">(</span><span class="n">Order</span> <span class="k">memory</span> <span class="n">order</span><span class="p">)</span>
+    <span class="k">internal</span>
+    <span class="k">pure</span>
+    <span class="k">returns</span> <span class="p">(</span><span class="kt">bytes32</span> <span class="n">hash</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="cm">/* Unfortunately abi.encodePacked doesn't work here, stack size constraints. */</span>
+    <span class="kt">uint</span> <span class="n">size</span> <span class="o">=</span> <span class="n">sizeOf</span><span class="p">(</span><span class="n">order</span><span class="p">);</span>
+    <span class="kt">bytes</span> <span class="k">memory</span> <span class="n">array</span> <span class="o">=</span> <span class="k">new</span> <span class="kt">bytes</span><span class="p">(</span><span class="n">size</span><span class="p">);</span>
+    <span class="kt">uint</span> <span class="n">index</span><span class="p">;</span>
+    <span class="k">assembly</span> <span class="p">{</span>
+        <span class="n">index</span> <span class="o">:=</span> <span class="n">add</span><span class="p">(</span><span class="n">array</span><span class="p">,</span> <span class="mh">0x20</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="n">index</span> <span class="o">=</span> <span class="n">ArrayUtils</span><span class="p">.</span><span class="n">unsafeWriteAddress</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="n">order</span><span class="p">.</span><span class="n">exchange</span><span class="p">);</span>
+    <span class="n">index</span> <span class="o">=</span> <span class="n">ArrayUtils</span><span class="p">.</span><span class="n">unsafeWriteAddress</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="n">order</span><span class="p">.</span><span class="n">maker</span><span class="p">);</span>
+    <span class="n">index</span> <span class="o">=</span> <span class="n">ArrayUtils</span><span class="p">.</span><span class="n">unsafeWriteAddress</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="n">order</span><span class="p">.</span><span class="n">taker</span><span class="p">);</span>
+    <span class="n">index</span> <span class="o">=</span> <span class="n">ArrayUtils</span><span class="p">.</span><span class="n">unsafeWriteUint</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="n">order</span><span class="p">.</span><span class="n">makerRelayerFee</span><span class="p">);</span>
+    <span class="n">index</span> <span class="o">=</span> <span class="n">ArrayUtils</span><span class="p">.</span><span class="n">unsafeWriteUint</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="n">order</span><span class="p">.</span><span class="n">takerRelayerFee</span><span class="p">);</span>
+    <span class="n">index</span> <span class="o">=</span> <span class="n">ArrayUtils</span><span class="p">.</span><span class="n">unsafeWriteUint</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="n">order</span><span class="p">.</span><span class="n">makerProtocolFee</span><span class="p">);</span>
+    <span class="n">index</span> <span class="o">=</span> <span class="n">ArrayUtils</span><span class="p">.</span><span class="n">unsafeWriteUint</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="n">order</span><span class="p">.</span><span class="n">takerProtocolFee</span><span class="p">);</span>
+    <span class="n">index</span> <span class="o">=</span> <span class="n">ArrayUtils</span><span class="p">.</span><span class="n">unsafeWriteAddress</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="n">order</span><span class="p">.</span><span class="n">feeRecipient</span><span class="p">);</span>
+    <span class="n">index</span> <span class="o">=</span> <span class="n">ArrayUtils</span><span class="p">.</span><span class="n">unsafeWriteUint8</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="kt">uint8</span><span class="p">(</span><span class="n">order</span><span class="p">.</span><span class="n">feeMethod</span><span class="p">));</span>
+    <span class="n">index</span> <span class="o">=</span> <span class="n">ArrayUtils</span><span class="p">.</span><span class="n">unsafeWriteUint8</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="kt">uint8</span><span class="p">(</span><span class="n">order</span><span class="p">.</span><span class="n">side</span><span class="p">));</span>
+    <span class="n">index</span> <span class="o">=</span> <span class="n">ArrayUtils</span><span class="p">.</span><span class="n">unsafeWriteUint8</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="kt">uint8</span><span class="p">(</span><span class="n">order</span><span class="p">.</span><span class="n">saleKind</span><span class="p">));</span>
+    <span class="n">index</span> <span class="o">=</span> <span class="n">ArrayUtils</span><span class="p">.</span><span class="n">unsafeWriteAddress</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="n">order</span><span class="p">.</span><span class="n">target</span><span class="p">);</span>
+    <span class="n">index</span> <span class="o">=</span> <span class="n">ArrayUtils</span><span class="p">.</span><span class="n">unsafeWriteUint8</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="kt">uint8</span><span class="p">(</span><span class="n">order</span><span class="p">.</span><span class="n">howToCall</span><span class="p">));</span>
+    <span class="n">index</span> <span class="o">=</span> <span class="n">ArrayUtils</span><span class="p">.</span><span class="n">unsafeWriteBytes</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="n">order</span><span class="p">.</span><span class="k">calldata</span><span class="p">);</span>
+    <span class="n">index</span> <span class="o">=</span> <span class="n">ArrayUtils</span><span class="p">.</span><span class="n">unsafeWriteBytes</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="n">order</span><span class="p">.</span><span class="n">replacementPattern</span><span class="p">);</span>
+    <span class="n">index</span> <span class="o">=</span> <span class="n">ArrayUtils</span><span class="p">.</span><span class="n">unsafeWriteAddress</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="n">order</span><span class="p">.</span><span class="n">staticTarget</span><span class="p">);</span>
+    <span class="n">index</span> <span class="o">=</span> <span class="n">ArrayUtils</span><span class="p">.</span><span class="n">unsafeWriteBytes</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="n">order</span><span class="p">.</span><span class="n">staticExtradata</span><span class="p">);</span>
+    <span class="n">index</span> <span class="o">=</span> <span class="n">ArrayUtils</span><span class="p">.</span><span class="n">unsafeWriteAddress</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="n">order</span><span class="p">.</span><span class="n">paymentToken</span><span class="p">);</span>
+    <span class="n">index</span> <span class="o">=</span> <span class="n">ArrayUtils</span><span class="p">.</span><span class="n">unsafeWriteUint</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="n">order</span><span class="p">.</span><span class="n">basePrice</span><span class="p">);</span>
+    <span class="n">index</span> <span class="o">=</span> <span class="n">ArrayUtils</span><span class="p">.</span><span class="n">unsafeWriteUint</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="n">order</span><span class="p">.</span><span class="n">extra</span><span class="p">);</span>
+    <span class="n">index</span> <span class="o">=</span> <span class="n">ArrayUtils</span><span class="p">.</span><span class="n">unsafeWriteUint</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="n">order</span><span class="p">.</span><span class="n">listingTime</span><span class="p">);</span>
+    <span class="n">index</span> <span class="o">=</span> <span class="n">ArrayUtils</span><span class="p">.</span><span class="n">unsafeWriteUint</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="n">order</span><span class="p">.</span><span class="n">expirationTime</span><span class="p">);</span>
+    <span class="n">index</span> <span class="o">=</span> <span class="n">ArrayUtils</span><span class="p">.</span><span class="n">unsafeWriteUint</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="n">order</span><span class="p">.</span><span class="n">salt</span><span class="p">);</span>
+    <span class="k">assembly</span> <span class="p">{</span>
+        <span class="n">hash</span> <span class="o">:=</span> <span class="nb">keccak256</span><span class="p">(</span><span class="n">add</span><span class="p">(</span><span class="n">array</span><span class="p">,</span> <span class="mh">0x20</span><span class="p">),</span> <span class="n">size</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="n">hash</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></div>
+<div class="language-solidity highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">index</span> <span class="o">=</span> <span class="n">ArrayUtils</span><span class="p">.</span><span class="n">unsafeWriteAddress</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="n">order</span><span class="p">.</span><span class="n">target</span><span class="p">);</span>
+<span class="n">index</span> <span class="o">=</span> <span class="n">ArrayUtils</span><span class="p">.</span><span class="n">unsafeWriteUint8</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="kt">uint8</span><span class="p">(</span><span class="n">order</span><span class="p">.</span><span class="n">howToCall</span><span class="p">));</span>
+<span class="n">index</span> <span class="o">=</span> <span class="n">ArrayUtils</span><span class="p">.</span><span class="n">unsafeWriteBytes</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="n">order</span><span class="p">.</span><span class="k">calldata</span><span class="p">);</span>
+<span class="n">index</span> <span class="o">=</span> <span class="n">ArrayUtils</span><span class="p">.</span><span class="n">unsafeWriteBytes</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="n">order</span><span class="p">.</span><span class="n">replacementPattern</span><span class="p">);</span>
+<span class="n">index</span> <span class="o">=</span> <span class="n">ArrayUtils</span><span class="p">.</span><span class="n">unsafeWriteAddress</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="n">order</span><span class="p">.</span><span class="n">staticTarget</span><span class="p">);</span>
+<span class="n">index</span> <span class="o">=</span> <span class="n">ArrayUtils</span><span class="p">.</span><span class="n">unsafeWriteBytes</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="n">order</span><span class="p">.</span><span class="n">staticExtradata</span><span class="p">);</span>
+<span class="n">index</span> <span class="o">=</span> <span class="n">ArrayUtils</span><span class="p">.</span><span class="n">unsafeWriteAddress</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="n">order</span><span class="p">.</span><span class="n">paymentToken</span><span class="p">);</span>
+</code></pre></div></div>
+
+<p>앞서 살펴봣듯이 위의 구조는 Horton 원칙을 위반한다.</p>
+
+<blockquote>
+  <p>이는 <code class="language-plaintext highlighter-rouge">abi.encodePacked</code>을 서명, 인증 및 데이터 무결성 체크에 확인할 때 주의해야하는 이유와 비슷하다.
+<code class="language-plaintext highlighter-rouge">keccak256(abi.encodePacked(a, b))</code>를 계산할 때 a와 b가 string, bytes와 같은 동적 타입이라면 a와 b의 값 일부를 서로 간에 이동시켜도 동일한 결과 값을 얻을 수 있다. 예시로 변수 string a = “test”, string b = “collision”이라고 해보자. <code class="language-plaintext highlighter-rouge">keccak256(abi.encodePacked(a, b)) = keccak256(abi.encodePacked("test", "collision")) = keccak256(abi.encodePacked("te", "stcollision"))</code>와 동일하다. 따라서 특별한 이유가 없다면 abi.encode 사용을 권고한다. 이러한 경고는 <a href="https://docs.soliditylang.org/en/latest/abi-spec.html#non-standard-packed-mode">Solidity Docs</a>에 non-standard mode의 주의사항으로 나와있다.</p>
+</blockquote>
+
+<p>해당 이슈는 Wyvern v2.3에서 <a href="https://github.com/ethereum/EIPs/blob/master/EIPS/eip-712.md">EIP712</a>를 사용함으로써 해결되었다.</p>
+
+<h3 id="yul을-통한-seaport의-가스-최적화">Yul을 통한 Seaport의 가스 최적화</h3>
+
+<h3 id="reference">Reference</h3>
+<ol>
+  <li><a href="https://nft.mirror.xyz/VdF3BYwuzXgLrJglw5xF6CHcQfAVbqeJVtueCr4BUzs">CTO of Opensa: A critical vulnerability in Wyvern Protocol</a></li>
+  <li><a href="https://blog.audit.haechi.io/wyvern_v2_2_1_1day_vulnerabilities">Haechi Audit: Wyvern v2.2 1-day Vulnerabilities</a></li>
+  <li><a href="https://github.com/ethereum/EIPs/blob/master/EIPS/eip-712.md">EIP712</a></li>
+</ol>
+
+:ET

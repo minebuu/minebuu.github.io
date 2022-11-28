@@ -114,21 +114,22 @@ function hashOrder(Order memory order)
 }
 ```
 
-위 코드처럼 order는 매우 많은 데이터들을 담고 있는데, 문제가 되는 부분은 `calldata`, `replacementPattern`, `staticExtradata`와 같은 Bytes 데이터들이다. 정해진 길이가 없는 임의의 값들이기 때문에 해당 데이터들간에 바이트들을 이동 (shifted) 시킴으로써 공격이 수행될 수 있다.  
+위 코드에서 order는 거래에 사용되는 매우 많은 데이터들을 담고 있는데, 이 order는 구매자 혹은 판매자에 의해 해시함수를 거쳐 서명된다. 문제가 되는 부분은 `calldata`, `replacementPattern`, `staticExtradata`와 같은 Bytes 데이터들이다. 위 코드에서 order 구조체를 해싱하는 `hashOrder` 함수를 살펴보자. 아래 함수는 order 구조체에 대해 `keccak256(abi.encodePacked(hashOrder))`를 수행한 것과 동일하다. [abi.encodePacked()](https://docs.soliditylang.org/en/latest/abi-spec.html#non-standard-packed-mode)는 Non-standard Packed Mode로서 Figure 1 처럼, string과 bytes와 같은 동적 타입들이 그대로 다른 값의 뒤에 이어진다. 문제는 order는 Bytes 동적 타입 데이터를 여러개 갖고 있기 때문에, 여기서 공격 취약점이 발생한다.
 
-```solidity
-index = ArrayUtils.unsafeWriteAddress(index, order.target);
-index = ArrayUtils.unsafeWriteUint8(index, uint8(order.howToCall));
-index = ArrayUtils.unsafeWriteBytes(index, order.calldata);
-index = ArrayUtils.unsafeWriteBytes(index, order.replacementPattern);
-index = ArrayUtils.unsafeWriteAddress(index, order.staticTarget);
-index = ArrayUtils.unsafeWriteBytes(index, order.staticExtradata);
-index = ArrayUtils.unsafeWriteAddress(index, order.paymentToken);
-```
+<p style="text-align: center;">
+	<img src="{{ site.url }}/assets/images/seaport/encodepacked.png" alt="Drawing" style="max-width: 80%; height: auto;"/>
+	<figcaption align = "center"><b>Figure 1. abi.encodePacked() 예시</b></figcaption>
+</p>
 
+우리는 order 구조체에서 `calldata`, `replacementPattern`, `staticExtradata` 3개의 Bytes 데이터가 존재한다는 것을 보았다. 어떻게 이를 통해 공격이 수행될 수 있을지를 보자. 예시로 변수 string a = "test", string b = "collision"이라고 해보자. `keccak256(abi.encodePacked(a, b)) = keccak256(abi.encodePacked("test", "collision")) = keccak256(abi.encodePacked("te", "stcollision"))`와 동일하다. 즉, 동적 타입 a와 b 값이 달라지더라도 인코딩된 값이 동일하기 때문에 같은 해시 값이 나오게 된다.
 
->이는 `abi.encodePacked`을 서명, 인증 및 데이터 무결성 체크에 확인할 때 주의해야하는 이유와 비슷하다.
-`keccak256(abi.encodePacked(a, b))`를 계산할 때 a와 b가 string, bytes와 같은 동적 타입이라면 a와 b의 값 일부를 서로 간에 이동시켜도 동일한 결과 값을 얻을 수 있다. 예시로 변수 string a = "test", string b = "collision"이라고 해보자. `keccak256(abi.encodePacked(a, b)) = keccak256(abi.encodePacked("test", "collision")) = keccak256(abi.encodePacked("te", "stcollision"))`와 동일하다. 따라서 특별한 이유가 없다면 abi.encode 사용을 권고한다. 이러한 경고는 [Solidity Docs](https://docs.soliditylang.org/en/latest/abi-spec.html#non-standard-packed-mode)에 non-standard mode의 주의사항으로 나와있다.    
+>이는 `abi.encodePacked`을 서명, 인증 및 데이터 무결성 체크에 확인할 때 주의해야하는 이유이다.
+`keccak256(abi.encodePacked(a, b))`를 계산할 때 a와 b가 string, bytes와 같은 동적 타입이라면 a와 b의 값 일부를 서로 간에 이동시켜도 동일한 결과 값을 얻을 수 있다. 따라서 특별한 이유가 없다면 abi.encode 사용을 권고한다. 이러한 경고는 [Solidity Docs](https://docs.soliditylang.org/en/latest/abi-spec.html#non-standard-packed-mode)에 non-standard mode의 주의사항으로 나와있으며 [SWC-133](https://swcregistry.io/docs/SWC-133)에도 이와 같은 해시 충돌에 대한 주의사항이 나와있다.   
+
+이를 악용하면 `calldata`, `replacementPattern`, `staticExtradata`의 바이트 값들을 서로 간에 이동 (shifted)시키더라도 같은 해시 값을 얻게 된다. 그럼 공격자는 이 3개의 변수를 조작함으로써 최종적으로 어떤 공격을 수행할 수 있을지를 더 살펴보자. 우선 이 데이터들이 어떻게 활용되는지를 살펴봐야 한다.     
+
+#### Calldata와 Replacement 패턴
+
 
 해당 이슈는 Wyvern v2.3에서 [EIP712]를 사용함으로써 해결되었다.
 

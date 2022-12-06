@@ -126,7 +126,118 @@ function hashOrder(Order memory order)
 >이는 `abi.encodePacked`을 서명, 인증 및 데이터 무결성 체크에 확인할 때 주의해야하는 이유이다.
 `keccak256(abi.encodePacked(a, b))`를 계산할 때 a와 b가 string, bytes와 같은 동적 타입이라면 a와 b의 값 일부를 서로 간에 이동시켜도 동일한 결과 값을 얻을 수 있다. 따라서 특별한 이유가 없다면 abi.encode 사용을 권고한다. 이러한 경고는 [Solidity Docs](https://docs.soliditylang.org/en/latest/abi-spec.html#non-standard-packed-mode)에 non-standard mode의 주의사항으로 나와있으며 [SWC-133](https://swcregistry.io/docs/SWC-133)에도 이와 같은 해시 충돌에 대한 주의사항이 나와있다.   
 
-이를 악용하면 `calldata`, `replacementPattern`, `staticExtradata`의 바이트 값들을 서로 간에 이동 (shifted)시키더라도 같은 해시 값을 얻게 된다. 그럼 공격자는 이 3개의 변수를 조작함으로써 최종적으로 어떤 공격을 수행할 수 있을지를 더 살펴보자. 우선 이 데이터들이 어떻게 활용되는지를 살펴봐야 한다.     
+이를 악용하면 `calldata`, `replacementPattern`, `staticExtradata`의 바이트 값들을 서로 간에 이동 (shifted)시키더라도 같은 해시 값을 얻게 된다. 그럼 공격자는 이 3개의 변수를 조작함으로써 최종적으로 어떤 공격을 수행할 수 있을지를 더 살펴보자. 우선 이 데이터들이 어떻게 활용되는지를 살펴봐야 한다. 아래는 Wyvern 컨트렉트에서 실제 NFT와 토큰의 거래가 매칭되는 [ExchangeCore.sol](https://github.com/ProjectWyvern/wyvern-ethereum/blob/master/contracts/exchange/ExchangeCore.sol#L665) 컨트렉트의 `atomicMatch` 함수이다.      
+
+```solidity
+/**
+ * @dev Atomically match two orders, ensuring validity of the match, and execute all associated state transitions. Protected against reentrancy by a contract-global lock.
+ * @param buy Buy-side order
+ * @param buySig Buy-side order signature
+ * @param sell Sell-side order
+ * @param sellSig Sell-side order signature
+ */
+function atomicMatch(Order memory buy, Sig memory buySig, Order memory sell, Sig memory sellSig, bytes32 metadata)
+    internal
+    reentrancyGuard
+{
+    /* CHECKS */
+
+    /* Ensure buy order validity and calculate hash if necessary. */
+    bytes32 buyHash;
+    if (buy.maker == msg.sender) {
+        require(validateOrderParameters(buy));
+    } else {
+        buyHash = requireValidOrder(buy, buySig);
+    }
+
+    /* Ensure sell order validity and calculate hash if necessary. */
+    bytes32 sellHash;
+    if (sell.maker == msg.sender) {
+        require(validateOrderParameters(sell));
+    } else {
+        sellHash = requireValidOrder(sell, sellSig);
+    }
+
+    /* Must be matchable. */
+    require(ordersCanMatch(buy, sell));
+
+    /* Target must exist (prevent malicious selfdestructs just prior to order settlement). */
+    uint size;
+    address target = sell.target;
+    assembly {
+        size := extcodesize(target)
+    }
+    require(size > 0);
+
+    /* Must match calldata after replacement, if specified. */
+    if (buy.replacementPattern.length > 0) {
+      ArrayUtils.guardedArrayReplace(buy.calldata, sell.calldata, buy.replacementPattern);
+    }
+    if (sell.replacementPattern.length > 0) {
+      ArrayUtils.guardedArrayReplace(sell.calldata, buy.calldata, sell.replacementPattern);
+    }
+    require(ArrayUtils.arrayEq(buy.calldata, sell.calldata));
+
+    /* Retrieve delegateProxy contract. */
+    OwnableDelegateProxy delegateProxy = registry.proxies(sell.maker);
+
+    /* Proxy must exist. */
+    require(delegateProxy != address(0));
+
+    /* Assert implementation. */
+    require(delegateProxy.implementation() == registry.delegateProxyImplementation());
+
+    /* Access the passthrough AuthenticatedProxy. */
+    AuthenticatedProxy proxy = AuthenticatedProxy(delegateProxy);
+
+    /* EFFECTS */
+
+    /* Mark previously signed or approved orders as finalized. */
+    if (msg.sender != buy.maker) {
+        cancelledOrFinalized[buyHash] = true;
+    }
+    if (msg.sender != sell.maker) {
+        cancelledOrFinalized[sellHash] = true;
+    }
+
+    /* INTERACTIONS */
+
+    /* Execute funds transfer and pay fees. */
+    uint price = executeFundsTransfer(buy, sell);
+
+    /* Execute specified call through proxy. */
+    require(proxy.proxy(sell.target, sell.howToCall, sell.calldata));
+
+    /* Static calls are intentionally done after the effectful call so they can check resulting state. */
+
+    /* Handle buy-side static call if specified. */
+    if (buy.staticTarget != address(0)) {
+        require(staticCall(buy.staticTarget, sell.calldata, buy.staticExtradata));
+    }
+
+    /* Handle sell-side static call if specified. */
+    if (sell.staticTarget != address(0)) {
+        require(staticCall(sell.staticTarget, sell.calldata, sell.staticExtradata));
+    }
+
+    /* Log match event. */
+    emit OrdersMatched(buyHash, sellHash, sell.feeRecipient != address(0) ? sell.maker : buy.maker, sell.feeRecipient != address(0) ? buy.maker : sell.maker, price, metadata);
+}
+```
+
+
+<p style="text-align: center;">
+	<img src="{{ site.url }}/assets/images/seaport/guardedArrayReplace.png" alt="Drawing" style="max-width: 80%; height: auto;"/>
+	<figcaption align = "center"><b>Figure 2. guardedArrayReplace 함수 동작 예시</b></figcaption>
+</p>
+
+즉 위의 내용을 정리하자면, Wyvern v2.2의 서명 관련 취약점은 아래와 같다.
+
+1. EIP-712이 나오기 전이기 때문에 서명에 자체적인 Order 구조체를 사용. Order 구조체는 동적 타입인 Bytes 변수인 Calldata, replacementPattern, staticExtradata를 갖고 있음
+2. 여러 동적 타입 변수들을 갖고있음에도 불구하고, abi.encodePacked와 유사한 방식으로 데이터를 연속적으로 묶어 처리했기 때문에 해시 충돌이 발생할 수 있음. calldata, replacementPattern, staticExtradata 간에 비트 이동을 수행하더라도 같은 서명 값이 나오도록 조작할 수 있음.  
+3. atomicMatch 함수에서는 buyer&seller의 calldata와 replacementPattern을 통해 새로운 바이트 배열(calldata)을 생성. 해당 바이트 배열의 첫번째 4 바이트에는 transferFrom(address,address,uint256)에 해당하는 함수 selector가 포함되어 있으며 (`0x23b872dd`), nft 판매자의 주소와 구매자의 주소 그리고 tokenId 값이 포함되어 있음
+4. 공격자는 calldata, replacementPattern, staticExtradata 값을 조작함으로써 원래 호출되야하는 transfer 함수 대신에, getApproved(uint)가 호출되도록 calldta에 포함된 함수 selector를 변경할 수 있음. 이러한 조작은 replacementPattern과 guardedArrayReplace 함수를 이용하여 가능함.
+5. 따라서 이러한 공격을 통해 nft 전송은 수행하지 않고, 구매자 혹은 offer를 수행한 사람들의 돈만 가져가는 것이 가능함. transferfrom 대신에 호출되는 `getApproved(uint256 tokenId)` 함수는 특정 토큰 id에 승인된 주소를 반환할 뿐인 함수. 
 
 #### Calldata와 Replacement 패턴
 

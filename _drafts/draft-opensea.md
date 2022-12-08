@@ -234,10 +234,22 @@ function atomicMatch(Order memory buy, Sig memory buySig, Order memory sell, Sig
 즉 위의 내용을 정리하자면, Wyvern v2.2의 서명 관련 취약점은 아래와 같다.
 
 1. EIP-712이 나오기 전이기 때문에 서명에 자체적인 Order 구조체를 사용. Order 구조체는 동적 타입인 Bytes 변수인 Calldata, replacementPattern, staticExtradata를 갖고 있음
-2. 여러 동적 타입 변수들을 갖고있음에도 불구하고, abi.encodePacked와 유사한 방식으로 데이터를 연속적으로 묶어 처리했기 때문에 해시 충돌이 발생할 수 있음. calldata, replacementPattern, staticExtradata 간에 비트 이동을 수행하더라도 같은 서명 값이 나오도록 조작할 수 있음.  
-3. atomicMatch 함수에서는 buyer&seller의 calldata와 replacementPattern을 통해 새로운 바이트 배열(calldata)을 생성. 해당 바이트 배열의 첫번째 4 바이트에는 transferFrom(address,address,uint256)에 해당하는 함수 selector가 포함되어 있으며 (`0x23b872dd`), nft 판매자의 주소와 구매자의 주소 그리고 tokenId 값이 포함되어 있음
-4. 공격자는 calldata, replacementPattern, staticExtradata 값을 조작함으로써 원래 호출되야하는 transfer 함수 대신에, getApproved(uint)가 호출되도록 calldta에 포함된 함수 selector를 변경할 수 있음. 이러한 조작은 replacementPattern과 guardedArrayReplace 함수를 이용하여 가능함.
-5. 따라서 이러한 공격을 통해 nft 전송은 수행하지 않고, 구매자 혹은 offer를 수행한 사람들의 돈만 가져가는 것이 가능함. transferfrom 대신에 호출되는 `getApproved(uint256 tokenId)` 함수는 특정 토큰 id에 승인된 주소를 반환할 뿐인 함수. 
+2. 여러 동적 타입 변수들을 갖고있음에도 불구하고, abi.encodePacked와 유사한 방식으로 데이터를 연속적으로 묶어 처리했기 때문에 해시 충돌이 발생할 수 있음. 공격자는 calldata, replacementPattern, staticExtradata 간에 비트 이동을 수행하더라도 같은 서명 값이 나오도록 조작할 수 있음.  
+3. atomicMatch 함수에서는 buyer/seller의 calldata와 replacementPattern을 통해 새로운 바이트 배열(calldata)을 생성. 해당 바이트 배열의 첫번째 4 바이트에는 transferFrom(address,address,uint256)에 해당하는 함수 selector가 포함되어 있으며 (`0x23b872dd`), nft 판매자의 주소와 구매자의 주소 그리고 tokenId 값이 포함되어 있음
+4. 원래는 calldata를 인자로 delegratecall을 호출함으로써 nft를 구매자에게 전송하는 `transferfrom` 함수가 수행되어야하지만, 공격자는 calldata, replacementPattern, staticExtradata 값을 조작함으로써 transferfrom 함수 대신에 `getApproved(uint)`가 호출되도록 calldta에 포함된 함수 selector를 변경할 수 있음. 이러한 조작은 replacementPattern과 guardedArrayReplace 함수를 이용하여 가능함.
+5. 따라서 이러한 공격을 통해 nft 전송은 수행하지 않고, 구매자 혹은 offer를 수행한 사람들의 돈만 가져가는 것이 가능함. transferfrom 대신에 호출되는 `getApproved(uint256 tokenId)` 함수는 특정 토큰 id에 승인된 주소를 반환할 뿐인 함수이기 때문에 어떠한 상태 변화도 없이 정상적으로 처리된 것으로 간주됨.
+
+#### guardedArrayReplace 메모리 overwrite 취약점
+
+Wyvern 프로토콜에서 `atomicMatch` 함수는 replacementPattern을 이용하여 calldata를 변경한다. 이는 판매자가 nft를 판매하려고 리스팅하는 시점에서는 구매자가 정해져있지 않기 때문에, `transferFrom` 함수를 통해 nft를 수신할 주소를 확정하지 못하기 때문이다. 추후 transferfrom을 실행하려면 calldata에 수취인(구매자)의 주소가 포함되어야하고, 이를 위해 구매자가 replacementPattern을 이용해 `구매자 주소` 부분만 변경된 calldata를 생성한다. 예시 그림은 아래와 같으며 여기서는 판매자가 먼저 nft를 리스팅하는 시나리오를 기반으로 설명한다.
+
+<그림3>
+
+판매자가 리스팅을 수행하는 경우, order 구조체의 calldata에 첫 4 바이트엔 transferfrom(address,address,uint256)에 해당하는 함수 선택자 (function selector)인 `0x23b872dd`가 들어가며, 그 다음으로는 판매자의 address, 구매자의 address (이 시점엔 구매자를 모르므로 address(0)), 토큰 id 값이 순서대로 포함된다. 판매자의 order 구조체의 replacementPattern 바이트 변수는 calldata와 동일한 사이즈를 가진 bit mask이다. 해당 bit mask는 추후 교체될 구매자의 주소 자리에는 1 값을 갖고, 나머지 자리에는 0 값을 갖는다 (bytes로 표현될 때에는 0x00000000...FFFF...FFFF...0000의 형태이다).
+
+판매자가 리스팅 후 구매자가 구매하려할 때에는 판매자의 calldata에 자신의 구매자 주소를 추가한다. replacementPattern 역시 판매자와 동일하게 구매자의 주소 부분만 1 값을 갖는 배열이다. atomicMatch 함수에서는 `require(ordersCanMatch(buy, sell));`를 통해 이를 확인한다.  
+
+판매자가 nft를 먼저 리스팅하는것과는 반대로 구매자가 먼저 nft에 offer를 수행하는 경우를 가정해보자. 이 시나리오에서는 구매자의 calldata에서 판매자의 address 부분이 0으로 채워진다. offer를 제안하는 시점에 판매자의 주소는 알 수 있는데 왜 0으로 채우냐는 의문을 가질 수 있지만, 해당 nft가 다른 주인에게 이전되도 offer가 유효하게 유지되어야하므로 우리는 판매자의 주소를 거래 시점에 채우도록 한다. 여기서는 replacementPattern이 판매자의 주소 비트 부분이 1 값으로 채워지고, 추후 atomicMatch 함수에서 calldata의 판매자의 주소 부분이 교체된다.
 
 #### Calldata와 Replacement 패턴
 

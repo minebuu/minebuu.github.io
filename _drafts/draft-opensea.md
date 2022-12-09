@@ -235,7 +235,7 @@ function atomicMatch(Order memory buy, Sig memory buySig, Order memory sell, Sig
 4. `executeFundsTransfer` 함수를 통해 buyer가 seller에게 토큰을 지불한다.      
 5. nft contract 주소 (target)에 대해 call 혹은 delegatecall을 호출함으로써 `transferfrom(address from, address to, uint256 tokenId)` 함수를 호출한다. 이를 통해 seller는 buyer에게 nft를 전송한다. 이 때 calldata가 call 혹은 delegatecall의 파라미터로 사용됨으로써 transferfrom의 함수 선택자, from 주소, to 주소, tokenId 정보를 전달한다.
 
-우리는 이 과정에서 2번의 replacementPattern에 대해 좀 더 자세히 알아볼 필요가 있다. Wyvern 프로토콜에서 `atomicMatch` 함수는 replacementPattern을 이용하여 calldata를 변경한다. 위 atomicMatch 시나리오의 5번 과정에서 calldata가 call 혹은 delegatecall의 인자로서, trnasferfrom의 함수 선택자 뿐만 아니라 from 주소, to 주소, tokenId 정보를 알려주는 것을 상기하자. 중요한 점은 판매자가 nft를 리스팅하는 시점에는 구매자가 정해져있지 않기 때문에, to 주소를 calldata에 넣을 수가 없다. 그렇기 때문에 약간의 트릭을 사용하여, to 주소는 0 값으로 채워놓고 replacementPattern이라는 비트마스크(BitMask)를 사용하여 추후 이 to 주소 부분이 "구매자가 제출하는 calldata"에 의해서 ""판매자 calldata의 address to" 부분을 채워지도록한다. 아래 atomicMatch의 코드 일부분이 해당 기능을 수행한다.
+우리는 위 과정에서 2번의 replacementPattern에 대해 좀 더 자세히 알아볼 필요가 있다. Wyvern 프로토콜에서 `atomicMatch` 함수는 replacementPattern을 이용하여 calldata를 변경하는 과정을 거친다. 왜 이런 테크닉을 사용했을까? 위 atomicMatch 시나리오의 5번 과정에서 calldata가 call 혹은 delegatecall의 인자로서, trnasferfrom의 함수 선택자 뿐만 아니라 from 주소, to 주소, tokenId 정보를 알려주는 것을 상기하자. calldata는 이런 주소 정보를 모두 포함해야하지만, 판매자가 nft를 리스팅하는 시점에는 **구매자가 정해져있지 않기 때문에**, to 주소를 calldata에 넣을 수가 없다. 여기서 약간의 트릭을 사용한다. 아직 확정되지 않은 to 주소는 0 값으로 채워놓고 replacementPattern이라는 비트마스크(BitMask)를 사용하여, 추후 "구매자가 제출하는 calldata"에 의해서 "판매자 calldata의 address to" 부분을 채워지도록한다. 아래 atomicMatch의 코드 일부분이 해당 기능을 수행한다.
 
 ```
 if (sell.replacementPattern.length > 0) {
@@ -256,12 +256,18 @@ if (sell.replacementPattern.length > 0) {
 sell.calldata: [0x23b872dd][32 bytes의 address(판매자)][32 bytes의 address(0)][tokenId]
 buy.calldata: [0x23b872dd][32 bytes의 address(0)][32 bytes의 address(구매자)][tokenId]
 sell.replacementPattern: [0x00000000][32 bytes의 0][32 bytes의 1][32 bytes의 0]
+buy.replacementPattern: [0x00000000][32 bytes의 1][32 bytes의 0][32 bytes의 0]
 
 //do ArrayUtils.guardedArrayReplace(sell.calldata, buy.calldata, sell.replacementPattern);
 result: [0x23b872dd][32 bytes의 address(판매자)][32 bytes의 address(구매자)][tokenId]
+
+//do ArrayUtils.guardedArrayReplace(buy.calldata, sell.calldata, buy.replacementPattern);
+result: [0x23b872dd][32 bytes의 address(판매자)][32 bytes의 address(구매자)][tokenId]
 ```
 
-판매자가 리스팅을 수행하는 경우, order 구조체의 calldata에 첫 4 바이트엔 transferfrom(address,address,uint256)에 해당하는 함수 선택자 (function selector)인 `0x23b872dd`가 들어가며, 그 다음으로는 판매자의 address, 구매자의 address (이 시점엔 구매자를 모르므로 address(0)), 토큰 id 값이 순서대로 포함된다. 판매자의 order 구조체의 replacementPattern 바이트 변수는 calldata와 동일한 사이즈를 가진 bit mask이다. 해당 bit mask는 추후 교체될 구매자의 주소 자리에는 1 값을 갖고, 나머지 자리에는 0 값을 갖는다 (bytes로 표현될 때에는 0x00000000...FFFF...FFFF...0000의 형태이다).
+위 예제에 대해 살펴보자. 판매자가 리스팅을 수행하는 경우, sell.calldata의 첫 4 바이트에는 transferfrom(address,address,uint256)에 해당하는 함수 선택자 (function selector)인 `0x23b872dd`가 들어가며, 그 다음으로는 판매자의 address, 구매자의 address (이 시점엔 구매자를 모르므로 address(0)), 토큰 id 값이 순서대로 포함된다. 판매자의 order 구조체의 sell.replacementPattern 바이트 변수는 calldata와 동일한 사이즈를 가진 비트마스크이다. 판매자는 sell.calldata의 구매자 주소 부분만 바뀌는 것을 원하기 때문에 해당 부분만 1 값을 갖고 나머지는 0을 갖는다.
+
+반대로 구매자를 살펴보자. 구매자는 판매자의 calldata와는 다르게, address from 부분이 0으로 채워져있으며 to 부분은 자신의 주소로 채워진다. 이 역시 구매자는  
 
 판매자가 리스팅 후 구매자가 구매하려할 때에는 판매자의 calldata에 자신의 구매자 주소를 추가한다. replacementPattern 역시 판매자와 동일하게 구매자의 주소 부분만 1 값을 갖는 배열이다. atomicMatch 함수에서는 `require(ordersCanMatch(buy, sell));`를 통해 이를 확인한다.  
 

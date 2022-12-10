@@ -267,11 +267,38 @@ result: [0x23b872dd][32 bytes의 address(판매자)][32 bytes의 address(구매�
 
 위 예제에 대해 살펴보자. 판매자가 리스팅을 수행하는 경우, sell.calldata의 첫 4 바이트에는 transferfrom(address,address,uint256)에 해당하는 함수 선택자 (function selector)인 `0x23b872dd`가 들어가며, 그 다음으로는 판매자의 address, 구매자의 address (이 시점엔 구매자를 모르므로 address(0)), 토큰 id 값이 순서대로 포함된다. 판매자의 order 구조체의 sell.replacementPattern 바이트 변수는 calldata와 동일한 사이즈를 가진 비트마스크이다. 판매자는 sell.calldata의 구매자 주소 부분만 바뀌는 것을 원하기 때문에 해당 부분만 1 값을 갖고 나머지는 0을 갖는다.
 
-반대로 구매자를 살펴보자. 구매자는 판매자의 calldata와는 다르게, address from 부분이 0으로 채워져있으며 to 부분은 자신의 주소로 채워진다. 이 역시 구매자는  
+반대로 구매자를 살펴보자. 구매자는 판매자의 calldata와는 반대로 to 주소 부분이 자신의 주소로 채워지고, from 주소 부분이 0으로 채워진다. 이는 판매자가 리스팅하기 전에 구매자가 먼저 offer를 수행하는 경우에도 마찬가지이다. nft의 소유주가 바뀌더라도 상관없이 nft 구매자가 제시하는 offer가 유효해야하므로, 현재 판매하고 있는 판매자의 주소를 넣지 않고 0으로 채워넣는다. buy.replacementPattern은 from 주소 부분에만 1 값을 가지고, 나머지는 0을 가지도록 함으로써, 추후 buy.calldata의 from 부분이 sell.calldata를 통해 교체되도록한다. 
 
-판매자가 리스팅 후 구매자가 구매하려할 때에는 판매자의 calldata에 자신의 구매자 주소를 추가한다. replacementPattern 역시 판매자와 동일하게 구매자의 주소 부분만 1 값을 갖는 배열이다. atomicMatch 함수에서는 `require(ordersCanMatch(buy, sell));`를 통해 이를 확인한다.  
+결과적으로, ArrayUtils.guardedArrayReplace(sell.calldata, buy.calldata, sell.replacementPattern);과 ArrayUtils.guardedArrayReplace(buy.calldata, sell.calldata, buy.replacementPattern);의 결과는 똑같은 calldata를 생성해내게된다. 만약, 같지 않다면 require(ArrayUtils.arrayEq(buy.calldata, sell.calldata));에서 에러가 발생한다.
 
-판매자가 nft를 먼저 리스팅하는것과는 반대로 구매자가 먼저 nft에 offer를 수행하는 경우를 가정해보자. 이 시나리오에서는 구매자의 calldata에서 판매자의 address 부분이 0으로 채워진다. offer를 제안하는 시점에 판매자의 주소는 알 수 있는데 왜 0으로 채우냐는 의문을 가질 수 있지만, 해당 nft가 다른 주인에게 이전되도 offer가 유효하게 유지되어야하므로 우리는 판매자의 주소를 거래 시점에 채우도록 한다. 여기서는 replacementPattern이 판매자의 주소 비트 부분이 1 값으로 채워지고, 추후 atomicMatch 함수에서 calldata의 판매자의 주소 부분이 교체된다.
+이렇게 완성된 calldata는 위 5번 과정에서 transferfrom 함수를 실행하기 위한 call 혹은 delegatecall의 파라미터로 활용된다. 즉, 판매자가 구매자에게 target 컨트랙트의 tokenId에 해당하는 nft를 전송한다. calldata의 데이터 값이 조작된다면, 판매자가 구매자에게 nft 전송하는 기능이 정상적으로 동작하지 않을 수 있다. 앞서 살펴 봤듯이, order 구조체는 bytes 변수를 여러개 갖고 있음에도 불구하고 abi.encodePacked()과 유사한 방식으로 데이터를 인코딩하여 서명을 생성하였다. 이는 bytes 값인 calldata, replacementPattern, staticExtradata 사이에 비트 쉬프트 연산을 가능하게하는 취약점을 갖게한다. 아래는 0x0f6005af366bfa60bbdba5966b9209e81567dedb 주소에서 특정 nft에 offer를 제안했을 때, 공격자가 비트 쉬프트를 통해 공격하는 예시이다. 
+
+```  
+// True payload
+...
+'calldata': '0x23b872dd00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f6005af366bfa60bbdba5966b9209e81567dedb00000000000000000000000000000000000000000000000000000000000002b3', 
+'replacementPattern': '0x00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000', 
+'staticTarget': '0x0000000000000000000000000000000000000000', 
+'staticExtradata': '0x',
+...
+
+// Malicious payload
+...
+'calldata': '0x23b872dd00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f6005af36', 
+'replacementPattern': '0x6bfa60bbdba5966b9209e81567dedb00000000000000000000000000000000000000000000000000000000000002b300000000ffff', 
+'staticTarget': '0xffffffffffffffffffffffffffffffffffffffff', 
+'staticExtradata': '0xffffffffffffffffffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+...
+
+```  
+
+위 공격에서 비트 쉬프트를 통해 calldata의 일부 비트들을 replacementPattern으로 넘기는 것을 볼 수 있는데, 이는 replacementPattern을 통해 calldata의 함수 선택자 부분을 '교체' 하기 위해서이다. 원래의 함수 선택자는 0x23b872dd로, trasnferfrom에 해당하지만 공격자는 단 10 bit만 바꿈으로써 getApproved(uint) 함수의 선택자에 해당하는 0x081812fc로 변경할 수 있다. 
+
+```  
+0010 0011 1011 1000 0111 0010 1101 1101
+0000 1000 0001 1000 0001 0010 1111 1100
+```  
+ 
 
 즉 위의 내용을 정리하자면, Wyvern v2.2의 서명 관련 취약점은 아래와 같다.
 

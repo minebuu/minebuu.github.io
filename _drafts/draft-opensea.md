@@ -245,12 +245,7 @@ if (sell.replacementPattern.length > 0) {
 
 판매자의 replacementPattern이 존재할 때 guardedArrayReplace 함수를 실행하여 sell.calldata의 [4 bytes function selector][address from][address to][tokenId]에서 [address to] 부분을 구매자의 주소로 변경한다.
 
-아래는 간단한 예시들이다.  
-
-<p style="text-align: center;">
-	<img src="{{ site.url }}/assets/images/seaport/guardedArrayReplace.png" alt="Drawing" style="max-width: 80%; height: auto;"/>
-	<figcaption align = "center"><b>Figure 2. guardedArrayReplace 함수 동작 예시</b></figcaption>
-</p>
+아래는 간단한 예시이다.   
 
 ```
 sell.calldata: [0x23b872dd][32 bytes의 address(판매자)][32 bytes의 address(0)][tokenId]
@@ -267,42 +262,45 @@ result: [0x23b872dd][32 bytes의 address(판매자)][32 bytes의 address(구매�
 
 위 예제에 대해 살펴보자. 판매자가 리스팅을 수행하는 경우, sell.calldata의 첫 4 바이트에는 transferfrom(address,address,uint256)에 해당하는 함수 선택자 (function selector)인 `0x23b872dd`가 들어가며, 그 다음으로는 판매자의 address, 구매자의 address (이 시점엔 구매자를 모르므로 address(0)), 토큰 id 값이 순서대로 포함된다. 판매자의 order 구조체의 sell.replacementPattern 바이트 변수는 calldata와 동일한 사이즈를 가진 비트마스크이다. 판매자는 sell.calldata의 구매자 주소 부분만 바뀌는 것을 원하기 때문에 해당 부분만 1 값을 갖고 나머지는 0을 갖는다.
 
-반대로 구매자를 살펴보자. 구매자는 판매자의 calldata와는 반대로 to 주소 부분이 자신의 주소로 채워지고, from 주소 부분이 0으로 채워진다. 이는 판매자가 리스팅하기 전에 구매자가 먼저 offer를 수행하는 경우에도 마찬가지이다. nft의 소유주가 바뀌더라도 상관없이 nft 구매자가 제시하는 offer가 유효해야하므로, 현재 판매하고 있는 판매자의 주소를 넣지 않고 0으로 채워넣는다. buy.replacementPattern은 from 주소 부분에만 1 값을 가지고, 나머지는 0을 가지도록 함으로써, 추후 buy.calldata의 from 부분이 sell.calldata를 통해 교체되도록한다. 
+반대로 구매자를 살펴보자. 구매자는 판매자의 calldata와는 반대로 to 주소 부분이 자신의 주소로 채워지고, from 주소 부분이 0으로 채워진다. 이는 판매자가 리스팅하기 전에 구매자가 먼저 offer를 수행하는 경우에도 마찬가지이다. nft의 소유주가 바뀌더라도 상관없이 nft 구매자가 제시하는 offer가 유효해야하므로, 현재 판매하고 있는 판매자의 주소를 넣지 않고 0으로 채워넣는다. buy.replacementPattern은 from 주소 부분에만 1 값을 가지고, 나머지는 0을 가지도록 함으로써, 추후 buy.calldata의 from 부분이 sell.calldata를 통해 교체되도록한다.
 
 결과적으로, ArrayUtils.guardedArrayReplace(sell.calldata, buy.calldata, sell.replacementPattern);과 ArrayUtils.guardedArrayReplace(buy.calldata, sell.calldata, buy.replacementPattern);의 결과는 똑같은 calldata를 생성해내게된다. 만약, 같지 않다면 require(ArrayUtils.arrayEq(buy.calldata, sell.calldata));에서 에러가 발생한다.
 
-이렇게 완성된 calldata는 위 5번 과정에서 transferfrom 함수를 실행하기 위한 call 혹은 delegatecall의 파라미터로 활용된다. 즉, 판매자가 구매자에게 target 컨트랙트의 tokenId에 해당하는 nft를 전송한다. calldata의 데이터 값이 조작된다면, 판매자가 구매자에게 nft 전송하는 기능이 정상적으로 동작하지 않을 수 있다. 앞서 살펴 봤듯이, order 구조체는 bytes 변수를 여러개 갖고 있음에도 불구하고 abi.encodePacked()과 유사한 방식으로 데이터를 인코딩하여 서명을 생성하였다. 이는 bytes 값인 calldata, replacementPattern, staticExtradata 사이에 비트 쉬프트 연산을 가능하게하는 취약점을 갖게한다. 아래는 0x0f6005af366bfa60bbdba5966b9209e81567dedb 주소에서 특정 nft에 offer를 제안했을 때, 공격자가 비트 쉬프트를 통해 공격하는 예시이다. 
+이렇게 완성된 calldata는 위 5번 과정에서 transferfrom 함수를 실행하기 위한 call 혹은 delegatecall의 파라미터로 활용된다. 즉, 판매자가 구매자에게 target 컨트랙트의 tokenId에 해당하는 nft를 전송한다. calldata의 데이터 값이 조작된다면, 판매자가 구매자에게 nft 전송하는 기능이 정상적으로 동작하지 않을 수 있다. 앞서 살펴 봤듯이, order 구조체는 bytes 변수를 여러개 갖고 있음에도 불구하고 abi.encodePacked()과 유사한 방식으로 데이터를 인코딩하여 서명을 생성하였다. 이는 bytes 값인 calldata, replacementPattern, staticExtradata 사이에 비트 쉬프트 연산을 가능하게하는 취약점을 갖게한다. 아래는 `0x0f6005af366bfa60bbdba5966b9209e81567dedb` 주소에서 특정 nft에 offer를 제안했을 때, 공격자가 비트 쉬프트를 통해 공격하는 예시이다.
 
 ```  
 // True payload
 ...
-'calldata': '0x23b872dd00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f6005af366bfa60bbdba5966b9209e81567dedb00000000000000000000000000000000000000000000000000000000000002b3', 
-'replacementPattern': '0x00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000', 
-'staticTarget': '0x0000000000000000000000000000000000000000', 
+'calldata': '0x23b872dd00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f6005af366bfa60bbdba5966b9209e81567dedb00000000000000000000000000000000000000000000000000000000000002b3',
+'replacementPattern': '0x00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000',
+'staticTarget': '0x0000000000000000000000000000000000000000',
 'staticExtradata': '0x',
 ...
 
 // Malicious payload
 ...
-'calldata': '0x23b872dd00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f6005af36', 
-'replacementPattern': '0x6bfa60bbdba5966b9209e81567dedb00000000000000000000000000000000000000000000000000000000000002b300000000ffff', 
-'staticTarget': '0xffffffffffffffffffffffffffffffffffffffff', 
+'calldata': '0x23b872dd00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f6005af36',
+'replacementPattern': '0x6bfa60bbdba5966b9209e81567dedb00000000000000000000000000000000000000000000000000000000000002b300000000ffff',
+'staticTarget': '0xffffffffffffffffffffffffffffffffffffffff',
 'staticExtradata': '0xffffffffffffffffffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 ...
 
 ```  
 
-위 공격에서 비트 쉬프트를 통해 calldata의 일부 비트들을 replacementPattern으로 넘기는 것을 볼 수 있는데, 이는 replacementPattern을 통해 calldata의 함수 선택자 부분을 '교체' 하기 위해서이다. 원래의 함수 선택자는 0x23b872dd로, trasnferfrom에 해당하지만 공격자는 단 10 bit만 바꿈으로써 getApproved(uint) 함수의 선택자에 해당하는 0x081812fc로 변경할 수 있다. 
+위 공격에서 비트 쉬프트를 통해 calldata의 일부 비트들을 replacementPattern으로 넘기는 것을 볼 수 있는데, 이는 replacementPattern을 통해 calldata의 함수 선택자 부분을 '교체' 하기 위해서이다. 원래의 함수 선택자는 `0x23b872dd`로, trasnferfrom에 해당하지만 공격자는 단 10 bit만 바꿈으로써 getApproved(uint) 함수의 선택자에 해당하는 `0x081812fc`로 변경할 수 있다. `0x23b872dd`를 `0x081812fc`로 변경하기 위해선 `xx1x 1x11 1x1x xxxx x11x xxxx xx1x xxx1`과 같은 패턴의 replacementPattern이 필요하다 (아래 예시 참고). 위의 True Payload에서 calldata의 `0x6bfa60bb` 부분부터 replacementPattern으로 옮기는 비트 쉬프트연산을 한다면 공격자는 위의 패턴을 만족하는 replacementPattern을 생성할 수 있다.
 
 ```  
-0010 0011 1011 1000 0111 0010 1101 1101
-0000 1000 0001 1000 0001 0010 1111 1100
+        0x23b872dd: 0010 0011 1011 1000 0111 0010 1101 1101
+        0x081812fc: 0000 1000 0001 1000 0001 0010 1111 1100
+replacementPattern: xx1x 1x11 1x1x xxxx x11x xxxx xx1x xxx1
+        0x6bfa60bb: 0110 1011 1111 1010 0110 0000 1011 1011
 ```  
- 
+
+그렇다면 모든 calldata가 `0x6bfa60bb`와 같이 위 패턴을 만들 수 있는 것은 아닐텐데, 위 패턴의 replacementPattern을 만들 수 있는 확률을 계산해보자. 우리는 replacementPattern에서 10 bit가 1인 부분이 (1/2^10) 필요하다. 32 bytes의 to주소를 비트 쉬프트 할 때 2바이트 단위로 움직일 수 있으므로, 총 16개의 비트 쉬프트 연산 시도가 가능하다. 따라서 16/2^10인 2^6 = 1/64의 확률로 offer를 조작할 수 있다. 즉, 64개의 offer 중 한개 정도는 위 공격 시나리오의 위험이 있으며, offer 구매자는 이더리움을 지불함에도 불구하고 nft는 받을 수 없게 된다.      
 
 즉 위의 내용을 정리하자면, Wyvern v2.2의 서명 관련 취약점은 아래와 같다.
 
-1. EIP-712이 나오기 전이기 때문에 서명에 자체적인 Order 구조체를 사용. Order 구조체는 동적 타입인 Bytes 변수인 Calldata, replacementPattern, staticExtradata를 갖고 있음
+1. Wyvern v2.2 프로토콜은 [EIP712]이 나오기 전에 개발되었기 때문에 서명에 자체적인 Order 구조체를 사용. Order 구조체는 동적 타입인 Bytes 변수인 Calldata, replacementPattern, staticExtradata를 갖고 있음
 2. 여러 동적 타입 변수들을 갖고있음에도 불구하고, abi.encodePacked와 유사한 방식으로 데이터를 연속적으로 묶어 처리했기 때문에 해시 충돌이 발생할 수 있음. 공격자는 calldata, replacementPattern, staticExtradata 간에 비트 이동을 수행하더라도 같은 서명 값이 나오도록 조작할 수 있음.  
 3. atomicMatch 함수에서는 buyer/seller의 calldata와 replacementPattern을 통해 새로운 바이트 배열(calldata)을 생성. 해당 바이트 배열의 첫번째 4 바이트에는 transferFrom(address,address,uint256)에 해당하는 함수 selector가 포함되어 있으며 (`0x23b872dd`), nft 판매자의 주소와 구매자의 주소 그리고 tokenId 값이 포함되어 있음
 4. 원래는 calldata를 인자로 delegratecall을 호출함으로써 nft를 구매자에게 전송하는 `transferfrom` 함수가 수행되어야하지만, 공격자는 calldata, replacementPattern, staticExtradata 값을 조작함으로써 transferfrom 함수 대신에 `getApproved(uint)`가 호출되도록 calldta에 포함된 함수 selector를 변경할 수 있음. 이러한 조작은 replacementPattern과 guardedArrayReplace 함수를 이용하여 가능함.

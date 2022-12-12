@@ -287,7 +287,7 @@ result: [0x23b872dd][32 bytes의 address(판매자)][32 bytes의 address(구매�
 
 ```  
 
-위 공격에서 비트 쉬프트를 통해 calldata의 일부 비트들을 replacementPattern으로 넘기는 것을 볼 수 있는데, 이는 replacementPattern을 통해 calldata의 함수 선택자 부분을 '교체' 하기 위해서이다. 원래의 함수 선택자는 `0x23b872dd`로, trasnferfrom에 해당하지만 공격자는 단 10 bit만 바꿈으로써 getApproved(uint) 함수의 선택자에 해당하는 `0x081812fc`로 변경할 수 있다. `0x23b872dd`를 `0x081812fc`로 변경하기 위해선 `xx1x 1x11 1x1x xxxx x11x xxxx xx1x xxx1`과 같은 패턴의 replacementPattern이 필요하다 (아래 예시 참고). 위의 True Payload에서 calldata의 `0x6bfa60bb` 부분부터 replacementPattern으로 옮기는 비트 쉬프트연산을 한다면 공격자는 위의 패턴을 만족하는 replacementPattern을 생성할 수 있다.
+위 공격에서 비트 쉬프트를 통해 calldata의 일부 비트들을 replacementPattern으로 넘기는 것을 볼 수 있는데, 이는 replacementPattern을 통해 calldata의 함수 선택자 부분을 '교체' 하기 위해서이다. 원래의 함수 선택자는 `0x23b872dd`로, trasnferfrom에 해당하지만 공격자는 단 10 bit만 바꿈으로써 getApproved(uint) 함수의 선택자에 해당하는 `0x081812fc`로 변경할 수 있다. `0x23b872dd`를 `0x081812fc`로 변경하기 위해선 `xx1x 1x11 1x1x xxxx x11x xxxx xx1x xxx1`과 같은 패턴의 replacementPattern이 필요하다 (아래 예시 참고). 위의 True Payload에서 calldata의 `0x6bfa60bb` 부분부터 replacementPattern으로 옮기는 비트 쉬프트연산을 한다면 공격자는 위의 패턴을 만족하는 replacementPattern을 생성할 수 있다. replacementPattern의 길이는 calldata 길이와 동일해야하기 때문에, 길이를 맞추기 위해 일부 바이트들은 staticTarget과 staticExtradata로 넘어간 점을 참고하자. 
 
 ```  
         0x23b872dd: 0010 0011 1011 1000 0111 0010 1101 1101
@@ -296,25 +296,23 @@ replacementPattern: xx1x 1x11 1x1x xxxx x11x xxxx xx1x xxx1
         0x6bfa60bb: 0110 1011 1111 1010 0110 0000 1011 1011
 ```  
 
-그렇다면 모든 calldata가 `0x6bfa60bb`와 같이 위 패턴을 만들 수 있는 것은 아닐텐데, 위 패턴의 replacementPattern을 만들 수 있는 확률을 계산해보자. 우리는 replacementPattern에서 10 bit가 1인 부분이 (1/2^10) 필요하다. 32 bytes의 to주소를 비트 쉬프트 할 때 2바이트 단위로 움직일 수 있으므로, 총 16개의 비트 쉬프트 연산 시도가 가능하다. 따라서 16/2^10인 2^6 = 1/64의 확률로 offer를 조작할 수 있다. 즉, 64개의 offer 중 한개 정도는 위 공격 시나리오의 위험이 있으며, offer 구매자는 이더리움을 지불함에도 불구하고 nft는 받을 수 없게 된다.      
+그렇다면 모든 calldata가 `0x6bfa60bb`와 같이 위 패턴을 만들 수 있는 것은 아닐텐데, 위 패턴의 replacementPattern을 만들 수 있는 확률을 계산해보자. 우리는 replacementPattern에서 10 bit가 1인 부분이 (1/2^10) 필요하다. 기존 calldata에서 from address는 0으로 채워져있고, tokenId 값 역시 대부분이 0으로 채워져있으므로 해당 부분은 replacemetnPattern의 앞 부분으로 비트 쉬프트를 해봤자 의미가 없다. address to 부분을 옮기는 것만 고려하면 되는데, 32 bytes의 to 주소를 비트 쉬프트 할 때 2바이트 단위로 움직일 수 있으므로, 총 16번의 비트 쉬프트 시도가 가능하다. 따라서 16번의 시도 중 특정 위치의 10 bit가 1일 확률은 16/2^10 = 1/64이다. 즉, 64개의 offer 중 한개 정도는 위 공격 시나리오의 위험이 있으며, offer 구매자는 이더리움을 지불함에도 불구하고 nft는 받을 수 없게 된다.      
 
 즉 위의 내용을 정리하자면, Wyvern v2.2의 서명 관련 취약점은 아래와 같다.
 
 1. Wyvern v2.2 프로토콜은 [EIP712]이 나오기 전에 개발되었기 때문에 서명에 자체적인 Order 구조체를 사용. Order 구조체는 동적 타입인 Bytes 변수인 Calldata, replacementPattern, staticExtradata를 갖고 있음
 2. 여러 동적 타입 변수들을 갖고있음에도 불구하고, abi.encodePacked와 유사한 방식으로 데이터를 연속적으로 묶어 처리했기 때문에 해시 충돌이 발생할 수 있음. 공격자는 calldata, replacementPattern, staticExtradata 간에 비트 이동을 수행하더라도 같은 서명 값이 나오도록 조작할 수 있음.  
 3. atomicMatch 함수에서는 buyer/seller의 calldata와 replacementPattern을 통해 새로운 바이트 배열(calldata)을 생성. 해당 바이트 배열의 첫번째 4 바이트에는 transferFrom(address,address,uint256)에 해당하는 함수 selector가 포함되어 있으며 (`0x23b872dd`), nft 판매자의 주소와 구매자의 주소 그리고 tokenId 값이 포함되어 있음
-4. 원래는 calldata를 인자로 delegratecall을 호출함으로써 nft를 구매자에게 전송하는 `transferfrom` 함수가 수행되어야하지만, 공격자는 calldata, replacementPattern, staticExtradata 값을 조작함으로써 transferfrom 함수 대신에 `getApproved(uint)`가 호출되도록 calldta에 포함된 함수 selector를 변경할 수 있음. 이러한 조작은 replacementPattern과 guardedArrayReplace 함수를 이용하여 가능함.
+4. 원래는 calldata를 인자로 delegratecall을 호출함으로써 nft를 구매자에게 전송하는 `transferfrom` 함수가 수행되어야하지만, 공격자는 calldata, replacementPattern, staticExtradata 값을 조작함으로써 transferfrom 함수 대신에 `getApproved(uint)`가 호출되도록 calldta에 포함된 함수 selector를 변경할 수 있음. 이러한 조작은 64개의 offer 중 한개 꼴로, calldata의 일부 비트를 replacementPattern로 옮김으로써 수행가능할 수 있음.
 5. 따라서 이러한 공격을 통해 nft 전송은 수행하지 않고, 구매자 혹은 offer를 수행한 사람들의 돈만 가져가는 것이 가능함. transferfrom 대신에 호출되는 `getApproved(uint256 tokenId)` 함수는 특정 토큰 id에 승인된 주소를 반환할 뿐인 함수이기 때문에 어떠한 상태 변화도 없이 정상적으로 처리된 것으로 간주됨.
+
+위 취약점은 발견 후 Wyvern v2.3으로 업그레이드되며 [EIP712]를 지원하는 것으로 해당 문제점을 해결하였다. EIP712에 대해 자세히 알고 싶다면, 블로그의 다른 포스트인 [지갑 데이터 서명(Signature)과 EIP712](https://minebuu.github.io/smart/contract/2022/11/14/Signature.html)를 참고하면 좋다. 현재 오픈씨는 Wyvern 프로토콜 대신 [Seaport](https://github.com/ProjectOpenSea/seaport)라는 별도 프로토콜을 개발하여 사용중이다. Seaport에 대해선 다음 포스팅에서 다뤄보도록 하겠다. 
 
 #### guardedArrayReplace 메모리 overwrite 취약점
 
 
-#### Calldata와 Replacement 패턴
-
-
-해당 이슈는 Wyvern v2.3에서 [EIP712]를 사용함으로써 해결되었다.
-
 ### Yul을 통한 Seaport의 가스 최적화
+
 
 ### Reference
 1. [CTO of Opensa: A critical vulnerability in Wyvern Protocol]

@@ -21,9 +21,14 @@ categories: Smart Contract
 ### Security issue 분석 (한국)
 1. [해치오딧(Heachi Audit) 블로그](https://blog.audit.haechi.io/)
 2. [수호아이오 리서쳐 스트로베리님의 블로그](https://strawberry.report/)
+3. [Ethereum Smart Contract Auditor's 2022 Rewind By Ventral Digital](https://ventral.digital/posts/2022/12/15/ethereum-smart-contract-auditors-2022-rewind)
 
 ### Solidity by example
 1. [Solidity by example](https://solidity-by-example.org/)
 2. [Consensys: Smart Contract Best Practices](https://consensys.github.io/smart-contract-best-practices)
 3. [Guylando: Security Recommendation And Best Practices](https://github.com/guylando/KnowledgeLists/blob/master/EthereumSmartContracts.md)
 4. [The Smart Contract Weakness Classification (SWC)](https://swcregistry.io/docs/SWC-100)
+
+### CTF
+1. [Paradigm 2022 CTF](https://github.com/paradigmxyz/paradigm-ctf-2022) 및 [Paradigm 2022 CTF Review By Inspex](https://inspexco.medium.com/paradigm-ctf-2022-writeup-2ce290cd9287)
+
